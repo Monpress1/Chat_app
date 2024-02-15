@@ -41,7 +41,7 @@ Open the browser and type the below URL.
 
 
 
-## How to use chat app running in the browser
+# How to use chat app running in the browser
 
 ### Join a Chat Room:
 
