@@ -52,7 +52,7 @@ const io = new Server(server, {
 // Gemini API Configuration - **INSECURE: API KEY DIRECTLY IN CODE**
 // **DO NOT DO THIS IN PRODUCTION! Use Environment Variables!**
 // -------------------------------------------------------------
-const GEMINI_API_KEY = "AIzaSyAWMbK4XziFm3xkMCb6xQHDUQe3UIh97ko"; // **REPLACE THIS WITH YOUR ACTUAL API KEY**
+const GEMINI_API_KEY = "AIzaSyChJ1ako14uH-vOoPW52edT1RvNCz5R9VU"; // **REPLACE THIS WITH YOUR ACTUAL API KEY**
 
 if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY") {
     console.error("CRITICAL ERROR: GEMINI_API_KEY is not set or is a placeholder!");
