@@ -1,4 +1,4 @@
-  const express = require('express');
+ const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
@@ -9,7 +9,7 @@ const server = http.createServer(app);
 
 // -------------------------------------------------------------
 // CONFIGURE ALLOWED ORIGINS FOR CORS
-// IMPORTANT: Replace with your ACTUAL Vercel frontend URL
+// IMPORTANT: Replace with your ACTUAL Vercel frontend URL(s)
 // -------------------------------------------------------------
 const ALLOWED_ORIGINS = [
     'http://localhost:3000',
@@ -20,9 +20,10 @@ const ALLOWED_ORIGINS = [
 
 app.use(express.json());
 
+// CORS for HTTP requests (like /health endpoint)
 app.use(cors({
     origin: (origin, callback) => {
-        if (ALLOWED_ORIGINS.includes(origin) || !origin) {
+        if (ALLOWED_ORIGINS.includes(origin) || !origin) { // !origin allows same-origin requests
             callback(null, true);
         } else {
             console.warn(`CORS blocked HTTP request from origin: ${origin}`);
@@ -33,6 +34,7 @@ app.use(cors({
     credentials: true
 }));
 
+// Socket.IO server setup
 const io = new Server(server, {
     cors: {
         origin: (origin, callback) => {
@@ -49,66 +51,27 @@ const io = new Server(server, {
 });
 
 // -------------------------------------------------------------
-// Gemini API Configuration - **INSECURE: API KEY DIRECTLY IN CODE**
-// **DO NOT DO THIS IN PRODUCTION! Use Environment Variables!**
+// Gemini API Configuration - **API KEY DIRECTLY IN CODE (AS REQUESTED)**
+// WARNING: This is INSECURE for production. Use Environment Variables.
 // -------------------------------------------------------------
-const GEMINI_API_KEY = "AIzaSyChJ1ako14uH-vOoPW52edT1RvNCz5R9VU"; // **REPLACE THIS WITH YOUR ACTUAL API KEY**
+const GEMINI_API_KEY = "AIzaSyChJ1ako14uH-vOoPW52edT1RvNCz5R9VU"; // **Your API Key HERE**
+const GEMINI_MODEL_ID = "gemini-1.5-flash-latest"; // You can change this to "gemini-1.5-pro-latest" or "gemini-2.5-flash-preview-05-20" if you prefer.
 
 if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY") {
     console.error("CRITICAL ERROR: GEMINI_API_KEY is not set or is a placeholder!");
-    console.error("Please replace 'YOUR_GEMINI_API_KEY' with your actual key, or use environment variables.");
-    process.exit(1);
+    console.error("Please replace 'YOUR_GEMINI_API_KEY' with your actual key.");
+    process.exit(1); // Exit if API key is not found
 }
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-// -------------------------------------------------------------
-// NEW: Function to list available models for debugging
-// -------------------------------------------------------------
-async function listAvailableModels() {
-    console.log("Attempting to list available Gemini models...");
-    try {
-        const { models } = await genAI.listModels();
-        console.log("--- Available Gemini Models ---");
-        if (models && models.length > 0) {
-            models.forEach(model => {
-                console.log(`Name: ${model.name}`);
-                console.log(`  DisplayName: ${model.displayName}`);
-                console.log(`  Description: ${model.description}`);
-                console.log(`  Supported Generation Methods: ${model.supportedGenerationMethods ? model.supportedGenerationMethods.join(', ') : 'None'}`);
-                console.log('---');
-            });
-            console.log("--- End of Model List ---");
-
-            // Look for models that support 'generateContent'
-            const textGenerationModels = models.filter(m => 
-                m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent')
-            );
-            if (textGenerationModels.length > 0) {
-                console.log("\nRECOMMENDED MODELS FOR TEXT GENERATION:");
-                textGenerationModels.forEach(m => console.log(`- ${m.name} (DisplayName: ${m.displayName})`));
-            } else {
-                console.log("\nNo models found that directly support 'generateContent' with this key/region.");
-            }
-
-        } else {
-            console.log("No models returned. API key might be invalid or region is unsupported.");
-        }
-    } catch (error) {
-        console.error("ERROR listing models:", error);
-    }
-}
-
-// Call the function when the server starts
-listAvailableModels();
-
-// Initialize the model *after* listing them, so we can use the correct one
-// For now, let's keep a placeholder. We'll update this after you get the list.
-const model = genAI.getGenerativeModel({ model: "REPLACE_WITH_CORRECT_MODEL_NAME" }); // Placeholder for now
+// Initialize the model
+const model = genAI.getGenerativeModel({ model: GEMINI_MODEL_ID });
+console.log(`Gemini model initialized: ${GEMINI_MODEL_ID}`);
 
 
 // -------------------------------------------------------------
-// Socket.IO Event Handlers - Simplified for AI Chat
+// Socket.IO Event Handlers for AI Chat
 // -------------------------------------------------------------
 io.on('connection', (socket) => {
     console.log(`User Connected: ${socket.id}`);
@@ -124,15 +87,31 @@ io.on('connection', (socket) => {
         });
 
         try {
-            // Only try to generate content if the model is correctly initialized
-            if (model.modelName === "REPLACE_WITH_CORRECT_MODEL_NAME") {
-                 throw new Error("Gemini model not yet set. Please check logs for available models.");
-            }
+            const userMessage = data.message;
+            
+            // Define generation configuration
+            const generationConfig = {
+                temperature: 0.8,
+                maxOutputTokens: 4096, // Use the larger token limit you found works
+            };
 
-            const prompt = data.message;
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            const aiText = response.text();
+            // Define safety settings
+            const safetySettings = [
+                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+            ];
+
+            // Correctly format the prompt for generateContent
+            const result = await model.generateContent({
+                contents: [{ parts: [{ text: userMessage }] }],
+                generationConfig,
+                safetySettings,
+            });
+
+            const response = result.response;
+            const aiText = response.text(); // Get the generated text
 
             const aiMessageData = {
                 author: 'Gemini AI',
@@ -144,9 +123,19 @@ io.on('connection', (socket) => {
 
         } catch (error) {
             console.error('Error communicating with Gemini API:', error);
+            let errorMessage = `Oops! An AI error occurred.`;
+            if (error.response && error.response.candidates && error.response.candidates.length > 0 && error.response.candidates[0].finishReason === 'SAFETY') {
+                errorMessage = `I can't respond to that. It might violate safety guidelines.`;
+                console.warn('AI response blocked by safety settings:', error.response.prompt_feedback);
+            } else if (error.message.includes('quota')) {
+                 errorMessage = `AI is busy or hit a quota limit. Please try again in a minute.`;
+            } else {
+                 errorMessage = `AI error: ${error.message}. Check backend logs.`;
+            }
+           
             const errorMessageData = {
                 author: 'Gemini AI',
-                message: `Oops! AI error: ${error.message}. Check backend logs.`, // More descriptive error
+                message: errorMessage,
                 time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
             };
             socket.emit('receive_message', errorMessageData);
