@@ -1,4 +1,4 @@
- const express = require('express');
+  const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
@@ -61,8 +61,50 @@ if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY") {
 }
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-// Changed model name based on previous error
-const model = genAI.getGenerativeModel({ model: "@google/generative-ai/gemini-pro" });
+
+// -------------------------------------------------------------
+// NEW: Function to list available models for debugging
+// -------------------------------------------------------------
+async function listAvailableModels() {
+    console.log("Attempting to list available Gemini models...");
+    try {
+        const { models } = await genAI.listModels();
+        console.log("--- Available Gemini Models ---");
+        if (models && models.length > 0) {
+            models.forEach(model => {
+                console.log(`Name: ${model.name}`);
+                console.log(`  DisplayName: ${model.displayName}`);
+                console.log(`  Description: ${model.description}`);
+                console.log(`  Supported Generation Methods: ${model.supportedGenerationMethods ? model.supportedGenerationMethods.join(', ') : 'None'}`);
+                console.log('---');
+            });
+            console.log("--- End of Model List ---");
+
+            // Look for models that support 'generateContent'
+            const textGenerationModels = models.filter(m => 
+                m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent')
+            );
+            if (textGenerationModels.length > 0) {
+                console.log("\nRECOMMENDED MODELS FOR TEXT GENERATION:");
+                textGenerationModels.forEach(m => console.log(`- ${m.name} (DisplayName: ${m.displayName})`));
+            } else {
+                console.log("\nNo models found that directly support 'generateContent' with this key/region.");
+            }
+
+        } else {
+            console.log("No models returned. API key might be invalid or region is unsupported.");
+        }
+    } catch (error) {
+        console.error("ERROR listing models:", error);
+    }
+}
+
+// Call the function when the server starts
+listAvailableModels();
+
+// Initialize the model *after* listing them, so we can use the correct one
+// For now, let's keep a placeholder. We'll update this after you get the list.
+const model = genAI.getGenerativeModel({ model: "REPLACE_WITH_CORRECT_MODEL_NAME" }); // Placeholder for now
 
 
 // -------------------------------------------------------------
@@ -76,31 +118,35 @@ io.on('connection', (socket) => {
 
         // Acknowledge the user's message back to their own client (optional, but good for UI)
         socket.emit('receive_message', {
-            author: 'You', // Display as "You"
+            author: 'You',
             message: data.message,
             time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
         });
 
         try {
+            // Only try to generate content if the model is correctly initialized
+            if (model.modelName === "REPLACE_WITH_CORRECT_MODEL_NAME") {
+                 throw new Error("Gemini model not yet set. Please check logs for available models.");
+            }
+
             const prompt = data.message;
             const result = await model.generateContent(prompt);
             const response = await result.response;
             const aiText = response.text();
 
             const aiMessageData = {
-                author: 'Gemini AI', // Distinct author for AI messages
+                author: 'Gemini AI',
                 message: aiText,
                 time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
             };
 
-            // Send the AI's response ONLY to the sender of the message
             socket.emit('receive_message', aiMessageData);
 
         } catch (error) {
             console.error('Error communicating with Gemini API:', error);
             const errorMessageData = {
                 author: 'Gemini AI',
-                message: 'Oops! I encountered an error. Please try again.',
+                message: `Oops! AI error: ${error.message}. Check backend logs.`, // More descriptive error
                 time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
             };
             socket.emit('receive_message', errorMessageData);
