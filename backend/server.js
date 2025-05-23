@@ -1,4 +1,4 @@
-const express = require('express');
+ const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
@@ -54,24 +54,22 @@ const io = new Server(server, {
 // -------------------------------------------------------------
 const GEMINI_API_KEY = "AIzaSyAWMbK4XziFm3xkMCb6xQHDUQe3UIh97ko"; // **REPLACE THIS WITH YOUR ACTUAL API KEY**
 
-if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY") { // Added check for placeholder
+if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY") {
     console.error("CRITICAL ERROR: GEMINI_API_KEY is not set or is a placeholder!");
     console.error("Please replace 'YOUR_GEMINI_API_KEY' with your actual key, or use environment variables.");
     process.exit(1);
 }
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+// Changed model name based on previous error
+const model = genAI.getGenerativeModel({ model: "@google/generative-ai/gemini-pro" });
+
 
 // -------------------------------------------------------------
 // Socket.IO Event Handlers - Simplified for AI Chat
 // -------------------------------------------------------------
 io.on('connection', (socket) => {
     console.log(`User Connected: ${socket.id}`);
-
-    // No 'join_room' event needed as each user chats with AI directly
-    // If you need to keep track of conversations or history per user,
-    // you might use socket.id as a room ID internally, but not exposed to client as 'room'
 
     socket.on('send_message', async (data) => {
         console.log(`Message received from client ${socket.id}: "${data.message}"`);
