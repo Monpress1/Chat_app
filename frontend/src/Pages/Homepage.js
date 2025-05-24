@@ -1,273 +1,173 @@
- import React, { useState, useEffect, useRef, useCallback } from 'react';
-import io from 'socket.io-client';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faMicrophone, faStop, faPaperPlane, faImage, faTimes, faVolumeHigh, faSpeaker } from '@fortawesome/free-solid-svg-icons';
+ import React, { useEffect, useRef, useState, useCallback } from "react";
+import { Mic, MicOff, X } from "lucide-react"; // Assuming Lucide React icons are installed
 
-// -------------------------------------------------------------
-// CONFIGURE BACKEND URL
-// IMPORTANT: Replace with your ACTUAL Render backend URL
-// -------------------------------------------------------------
-const BACKEND_URL = "https://chat-app-backend-eli-monpresss-projects.vercel.app"; // <--- CONFIRM THIS IS YOUR RENDER BACKEND URL
+export default function VoiceInterface({
+  isCallMode,
+  setIsCallMode,
+  handleSend, // Function to send transcript to parent (ChatWithAI)
+  isSpeaking, // Prop: true if AI is currently speaking (from ChatWithAI)
+  setIsSpeaking, // Prop: Setter for parent's isSpeaking state (used for cleanup)
+}) {
+  // State for SpeechRecognition instance (now directly managed)
+  const [currentRecognition, setCurrentRecognition] = useState(null);
+  // State to track if microphone is actively listening
+  const [isListening, setIsListening] = useState(false);
 
-// -------------------------------------------------------------
-// Voice Recognition & Synthesis Setup (Web Speech API)
-// -------------------------------------------------------------
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const SpeechSynthesis = window.speechSynthesis;
+  // --- Speech Recognition Setup ---
+  const setupRecognition = useCallback(() => {
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
 
-const ChatWithAI = () => {
-    const [message, setMessage] = useState('');
-    const [messages, setMessages] = useState([]);
-    const [socket, setSocket] = useState(null);
-    const [isListening, setIsListening] = useState(false);
-    const [recognition, setRecognition] = useState(null);
-    const [isCallMode, setIsCallMode] = useState(false); // State to control voice mode
-    const [imageFile, setImageFile] = useState(null);
-    const [imagePreview, setImagePreview] = useState(null);
-    const [isSpeaking, setIsSpeaking] = useState(false);
+    if (!SpeechRecognition) {
+      alert("Speech recognition not supported in this browser.");
+      console.error("Web Speech API (SpeechRecognition) not found.");
+      return null;
+    }
 
-    const chatContainerRef = useRef(null); // Ref for scrolling to bottom
-    const currentRecognitionRef = useRef(null); // Ref to hold current recognition instance
+    const rec = new SpeechRecognition();
+    rec.lang = "en-US";
+    rec.continuous = false; // Only get one result per start
+    rec.interimResults = false; // Only final results
 
-    // Function to format timestamp
-    const formatTime = (date) => {
-        return new Date(date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    rec.onstart = () => {
+      setIsListening(true);
+      console.log('Voice recognition started...');
     };
 
-    // Auto-scroll to the bottom of the chat
-    useEffect(() => {
-        if (chatContainerRef.current) {
-            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-        }
-    }, [messages]); // Scroll whenever messages change
-
-    // Initialize Socket.IO connection
-    useEffect(() => {
-        const newSocket = io(BACKEND_URL);
-        setSocket(newSocket);
-
-        newSocket.on('connect', () => {
-            console.log('Connected to backend Socket.IO');
-        });
-
-        newSocket.on('receive_message', (data) => {
-            console.log('Received message:', data);
-
-            // Add a timestamp if none exists
-            if (!data.time) {
-                data.time = formatTime(new Date());
-            }
-
-            setMessages((prevMessages) => [...prevMessages, data]);
-
-            // If in call mode and AI sends a text message, speak it
-            if (isCallMode && data.author === 'Legacy' && data.message) {
-                speakText(data.message);
-            }
-        });
-
-        newSocket.on('disconnect', () => {
-            console.log('Disconnected from backend Socket.IO');
-            // Clean up recognition on disconnect if needed
-            if (currentRecognitionRef.current) {
-                currentRecognitionRef.current.stop();
-                currentRecognitionRef.current = null;
-            }
-            setIsListening(false);
-            setIsSpeaking(false);
-        });
-
-        return () => {
-            if (newSocket) {
-                newSocket.disconnect();
-            }
-        };
-    }, [isCallMode]); // Re-initialize socket if call mode changes (if needed, or just manage recognition within)
-
-
-    // Text to Speech (AI Speaking)
-    const speakText = useCallback((text) => {
-        if (!SpeechSynthesis) {
-            console.warn("Speech Synthesis not supported in this browser.");
-            return;
-        }
-
-        setIsSpeaking(true);
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1.0; // Normal speed
-        utterance.pitch = 1.0; // Normal pitch
-
-        utterance.onend = () => {
-            setIsSpeaking(false);
-            if (isCallMode && recognition) {
-                // Restart listening after AI finishes speaking in call mode
-                startListening();
-            }
-        };
-        utterance.onerror = (event) => {
-            console.error('SpeechSynthesisUtterance.onerror', event);
-            setIsSpeaking(false);
-            if (isCallMode && recognition) {
-                startListening(); // Attempt to restart even on error
-            }
-        };
-
-        SpeechSynthesis.speak(utterance);
-    }, [isCallMode, recognition]);
-
-
-    // Speech Recognition (Mic Listening)
-    const setupRecognition = useCallback(() => {
-        if (!SpeechRecognition) {
-            console.warn("Speech Recognition not supported in this browser.");
-            return null;
-        }
-
-        const newRecognition = new SpeechRecognition();
-        newRecognition.continuous = false; // Only get one result per start
-        newRecognition.interimResults = false; // Only final results
-        newRecognition.lang = 'en-US'; // Set language
-
-        newRecognition.onstart = () => {
-            setIsListening(true);
-            console.log('Voice recognition started...');
-        };
-
-        newRecognition.onresult = (event) => {
-            const transcript = event.results[0][0].transcript;
-            console.log('Transcript:', transcript);
-            setMessage(transcript); // Set transcript to input field
-            // Automatically send message after result
-            sendMessage(transcript, imageFile); // Send collected text
-        };
-
-        newRecognition.onend = () => {
-            console.log('Voice recognition ended.');
-            setIsListening(false);
-            // Don't auto-restart here in text mode, wait for AI reply in call mode
-        };
-
-        newRecognition.onerror = (event) => {
-            console.error('Speech recognition error', event);
-            setIsListening(false);
-            if (isCallMode && event.error !== 'no-speech') {
-                // Only try to restart if it's not a 'no-speech' error in call mode
-                setTimeout(startListening, 500); // Give a small delay before restarting
-            }
-        };
-
-        return newRecognition;
-    }, [imageFile]);
-
-
-    // Start Listening function
-    const startListening = useCallback(() => {
-        if (!recognition) {
-            const rec = setupRecognition();
-            setRecognition(rec);
-            currentRecognitionRef.current = rec;
-            if (rec) rec.start();
-        } else {
-            // Stop any existing recognition before starting new one
-            if (isListening && currentRecognitionRef.current) {
-                currentRecognitionRef.current.stop();
-            }
-            recognition.start();
-        }
-    }, [recognition, isListening, setupRecognition]);
-
-
-    // Stop Listening function
-    const stopListening = useCallback(() => {
-        if (isListening && currentRecognitionRef.current) {
-            currentRecognitionRef.current.stop();
-        }
-    }, [isListening]);
-
-
-    // Toggle Call Mode (Voice Chat)
-    const toggleCallMode = () => {
-        setIsCallMode(prev => !prev);
-        if (!isCallMode) { // If turning ON call mode
-            // Immediately start listening when entering call mode
-            if (!recognition) {
-                const rec = setupRecognition();
-                setRecognition(rec);
-                currentRecognitionRef.current = rec;
-                if (rec) rec.start();
-            } else {
-                // Stop any existing recognition before starting new one
-                if (isListening && currentRecognitionRef.current) {
-                    currentRecognitionRef.current.stop();
-                }
-                recognition.start();
-            }
-        } else { // If turning OFF call mode
-            stopListening();
-            // Stop any ongoing speech synthesis
-            if (SpeechSynthesis.speaking) {
-                SpeechSynthesis.cancel();
-            }
-            setIsSpeaking(false);
-        }
+    rec.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      console.log('Transcript received:', transcript);
+      if (transcript.trim() !== "") {
+        handleSend(transcript); // Send the transcript to the parent component
+      }
     };
 
+    rec.onend = () => {
+      setIsListening(false);
+      console.log('Voice recognition ended.');
+      // If in call mode AND AI is not speaking, attempt to restart listening
+      if (isCallMode && !isSpeaking) {
+        console.log('Attempting to restart listening after onend...');
+        // Add a small delay to prevent rapid re-starts or browser mic release issues
+        setTimeout(() => currentRecognition?.start(), 500);
+      }
+    };
 
-    // Auto Mic on Load (when component mounts, and in call mode)
-    useEffect(() => {
-        if (isCallMode) {
-            const rec = setupRecognition();
-            setRecognition(rec);
-            currentRecognitionRef.current = rec; // Store the ref
-            if (rec) rec.start(); // Start listening
-        }
-        // Cleanup function for unmounting
-        return () => {
-            if (currentRecognitionRef.current) {
-                currentRecognitionRef.current.stop();
-                currentRecognitionRef.current = null;
-            }
-            if (SpeechSynthesis.speaking) {
-                SpeechSynthesis.cancel();
-            }
-            setIsListening(false);
-            setIsSpeaking(false);
-        };
-    }, [isCallMode, setupRecognition]); // Depend on isCallMode and setupRecognition
+    rec.onerror = (event) => {
+      setIsListening(false);
+      console.error('Speech recognition error:', event.error);
+      // Try to restart if it's not a 'no-speech' error in call mode, and AI isn't speaking
+      if (isCallMode && event.error !== 'no-speech' && !isSpeaking) {
+        console.log('Attempting to restart listening after error...');
+        setTimeout(() => currentRecognition?.start(), 500);
+      }
+    };
+
+    return rec;
+  }, [isCallMode, handleSend, isSpeaking, currentRecognition]); // currentRecognition added for the restart logic in onend/onerror
+
+  // --- Mic Control Functions ---
+  const startListening = useCallback(() => {
+    if (!currentRecognition) {
+      console.log("No recognition instance, setting up and starting.");
+      const rec = setupRecognition();
+      if (rec) {
+        setCurrentRecognition(rec);
+        rec.start();
+      }
+    } else if (!isListening) { // Only start if not already listening
+      console.log("Recognition instance exists, but not listening. Starting.");
+      currentRecognition.start();
+    } else {
+      console.log("Already listening, no need to restart.");
+    }
+  }, [currentRecognition, isListening, setupRecognition]);
 
 
-    // Send message to backend
-    const sendMessage = useCallback(async (text, image = null) => {
-        if (!socket) {
-            console.error('Socket not connected');
-            return;
-        }
+  const stopListening = useCallback(() => {
+    if (isListening && currentRecognition) {
+      console.log("Stopping listening.");
+      currentRecognition.stop();
+    }
+  }, [isListening, currentRecognition]);
 
-        const messageToSend = text || message; // Use passed text if available, else state message
-        if (!messageToSend && !image) return; // Don't send empty messages or no image
 
-        let imageData = null;
-        if (image) {
-            // Convert image file to Base64
-            const reader = new FileReader();
-            reader.readAsDataURL(image);
-            reader.onload = () => {
-                imageData = reader.result;
-                socket.emit('send_message', { message: messageToSend, image: imageData, time: formatTime(new Date()) });
-                setMessage(''); // Clear input field
-                setImageFile(null); // Clear image file
-                setImagePreview(null); // Clear image preview
-            };
-            reader.onerror = (error) => {
-                console.error("Error converting image to Base64:", error);
-            };
-            return; // Exit here, actual emit happens in reader.onload
-        }
+  // --- Toggle Voice Call Mode ---
+  const toggleCallMode = () => {
+    const newCallMode = !isCallMode;
+    setIsCallMode(newCallMode); // Update the parent's call mode state
 
-        // For text-only messages or if image conversion isn't needed
-        socket.emit('send_message', { message: messageToSend, image: imageData, time: formatTime(new Date()) });
-        setMessage(''); // Clear input field
-        setImageFile(null); // Clear image file
-        setImagePreview(null); // Clear image preview
+    if (!newCallMode) { // If turning OFF call mode
+      stopListening(); // Ensure mic is stopped
+      // Ensure any ongoing speech synthesis is cancelled
+      if (window.speechSynthesis && window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+      }
+      setIsSpeaking(false); // Reset AI speaking state in parent
+      setCurrentRecognition(null); // Clear the recognition instance
+    }
+    // If turning ON, useEffect will handle starting mic automatically
+  };
 
-    }, [socket, message, image
+  // --- Automatic Mic Start/Cleanup on Call Mode Change ---
+  useEffect(() => {
+    if (isCallMode) {
+      startListening(); // Automatically start listening when entering call mode
+    }
+
+    // Cleanup function when component unmounts or isCallMode changes
+    return () => {
+      // Ensure mic is stopped and synthesis cancelled on cleanup
+      currentRecognition?.stop();
+      if (window.speechSynthesis && window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+      }
+      setIsListening(false);
+      setIsSpeaking(false);
+      setCurrentRecognition(null); // Clear instance on cleanup
+    };
+  }, [isCallMode, startListening, setIsSpeaking, currentRecognition]);
+
+
+  return (
+    <div className="fixed bottom-0 left-0 w-full z-20 pointer-events-none">
+      {isCallMode && (
+        <div className="absolute inset-0 flex justify-center items-center pointer-events-auto bg-gradient-to-br from-black/80 via-purple-900/90 to-orange-900/90 backdrop-blur-lg p-8 rounded-t-xl">
+          {/* Main mic button in voice chat mode */}
+          <button
+            className={`bg-white text-black p-4 rounded-full shadow-xl transition-all duration-300 ${
+              isListening ? "animate-pulse" : "" // Pulse when actively listening
+            } ${isSpeaking ? "opacity-50 cursor-not-allowed" : ""}`} // Dim if AI is speaking
+            onClick={isListening ? stopListening : startListening} // Toggles listening
+            disabled={isSpeaking} // Disable while AI is speaking
+            title={isSpeaking ? "AI is speaking..." : (isListening ? "Stop listening" : "Start listening")}
+          >
+            {isListening ? <MicOff size={28} /> : <Mic size={28} />}
+          </button>
+
+          {/* Button to exit voice mode (top right) */}
+          <button
+            className="absolute top-4 right-4 text-white p-2 rounded-full hover:bg-white/20 transition"
+            onClick={toggleCallMode} // This button directly exits call mode
+            title="Exit Voice Mode"
+          >
+            <X size={24} />
+          </button>
+        </div>
+      )}
+
+      {!isCallMode && (
+        <div className="absolute bottom-4 right-4 pointer-events-auto">
+          {/* Button to enter voice chat mode (bottom right) */}
+          <button
+            className="bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 transition"
+            onClick={toggleCallMode} // This button directly enters call mode
+            title="Enter Voice Mode"
+          >
+            <Mic size={24} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
