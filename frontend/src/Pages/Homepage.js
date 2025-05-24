@@ -1,4 +1,4 @@
-  import React, { useState, useEffect, useRef, useCallback } from 'react';
+ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import io from 'socket.io-client';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPaperPlane, faImage, faTimes, faVolumeHigh } from '@fortawesome/free-solid-svg-icons';
@@ -15,7 +15,8 @@ const BACKEND_URL = "https://chat-app-backend-eli-monpresss-projects.vercel.app"
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const SpeechSynthesis = window.speechSynthesis;
 
-const ChatWithAI = () => {
+// Rename the component to Homepage as per your App.js usage
+const Homepage = () => {
     const [message, setMessage] = useState('');
     const [messages, setMessages] = useState([]);
     const [socket, setSocket] = useState(null);
@@ -216,7 +217,7 @@ const ChatWithAI = () => {
 
     // --- Automatic Mic Start/Cleanup on Call Mode Change (Integrated) ---
     useEffect(() => {
-        console.log("ChatWithAI useEffect (Voice Mode) triggered. isCallMode:", isCallMode);
+        console.log("Homepage useEffect (Voice Mode) triggered. isCallMode:", isCallMode); // Changed from ChatWithAI
         if (isCallMode) {
             console.log("isCallMode is true, attempting to start listening...");
             startListening(); // Automatically start listening when entering call mode
@@ -224,7 +225,7 @@ const ChatWithAI = () => {
 
         // Cleanup function when component unmounts or isCallMode changes
         return () => {
-            console.log("ChatWithAI useEffect (Voice Mode) cleanup. Stopping mic and speech.");
+            console.log("Homepage useEffect (Voice Mode) cleanup. Stopping mic and speech."); // Changed from ChatWithAI
             currentRecognition?.stop(); // Ensure mic is stopped
             if (SpeechSynthesis.speaking) {
                 SpeechSynthesis.cancel();
@@ -463,4 +464,4 @@ const ChatWithAI = () => {
     );
 };
 
-export default ChatWithAI;
+export default Homepage; // Changed export from ChatWithAI to Homepage
