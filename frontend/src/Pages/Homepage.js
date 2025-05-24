@@ -1,8 +1,7 @@
- import React, { useState, useEffect, useRef, useCallback } from 'react';
+  import React, { useState, useEffect, useRef, useCallback } from 'react';
 import io from 'socket.io-client';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPaperPlane, faImage, faTimes, faVolumeHigh } from '@fortawesome/free-solid-svg-icons';
-import { Mic, MicOff, X } from "lucide-react"; // Import Lucide React icons
 
 // -------------------------------------------------------------
 // CONFIGURE BACKEND URL
@@ -331,7 +330,7 @@ const ChatWithAI = () => {
                 {/* Chat Header */}
                 <div className="p-4 bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-md flex items-center justify-between">
                     <h1 className="text-xl font-bold">Legacy Chat</h1>
-                    {/* Voice Interface controls (now integrated) */}
+                    {/* Voice Interface controls (now integrated with text/emoji icons) */}
                     {isCallMode ? (
                         // Mic button in voice chat mode
                         <div className="flex items-center space-x-2">
@@ -343,7 +342,8 @@ const ChatWithAI = () => {
                                 disabled={isSpeaking} // Disable while AI is speaking
                                 title={isSpeaking ? "AI is speaking..." : (isListening ? "Stop listening" : "Start listening")}
                             >
-                                {isListening ? <MicOff size={24} /> : <Mic size={24} />}
+                                {/* Replaced Mic/MicOff icons with emojis/text */}
+                                <span className="text-xl">{isListening ? '🔇' : '🎤'}</span> {/* Muted speaker or Microphone emoji */}
                             </button>
                             {/* Button to exit voice mode */}
                             <button
@@ -351,7 +351,8 @@ const ChatWithAI = () => {
                                 onClick={toggleCallMode} // This button directly exits call mode
                                 title="Exit Voice Mode"
                             >
-                                <X size={24} />
+                                {/* Replaced X icon with emoji */}
+                                <span className="text-xl">✖️</span> {/* Multiplication X emoji */}
                             </button>
                         </div>
                     ) : (
@@ -361,7 +362,8 @@ const ChatWithAI = () => {
                             onClick={toggleCallMode} // This button directly enters call mode
                             title="Enter Voice Mode"
                         >
-                            <Mic size={24} />
+                            {/* Replaced Mic icon with emoji */}
+                            <span className="text-xl">🎤</span> {/* Microphone emoji */}
                         </button>
                     )}
                 </div>
