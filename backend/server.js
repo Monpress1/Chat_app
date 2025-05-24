@@ -128,7 +128,7 @@ io.on('connection', (socket) => {
                                     description: "An optional message or label for the alarm."
                                 }
                             },
-                            required: ["time"] // 'message' is optional because it's NOT listed here
+                            required: ["time"]
                         }
                     },
                     {
@@ -155,7 +155,7 @@ io.on('connection', (socket) => {
                                     description: "The name of the artist, if known."
                                 }
                             },
-                            required: ["songTitle"] // 'artistName' is optional
+                            required: ["songTitle"]
                         }
                     },
                     {
@@ -173,7 +173,7 @@ io.on('connection', (socket) => {
                                     description: "The phone number to call, if available or specified directly."
                                 }
                             },
-                            required: ["contactName"] // 'phoneNumber' is optional
+                            required: ["contactName"]
                         }
                     },
                     {
@@ -222,6 +222,9 @@ io.on('connection', (socket) => {
             console.log(`Image data received for analysis.`);
         }
 
+        // IMPORTANT: The 'You' message is handled on the frontend for voice input
+        // Only emit if it's a direct text message, or if you want to mirror it for all inputs
+        // For now, mirroring all inputs for backend logs, frontend decides display
         socket.emit('receive_message', {
             author: 'You',
             message: userMessage,
@@ -244,7 +247,7 @@ io.on('connection', (socket) => {
             if (imageData) {
                 const base64Content = imageData.split(';base64,').pop();
                 const mimeType = imageData.substring(imageData.indexOf(':') + 1, imageData.indexOf(';'));
-                
+
                 contents.push({
                     inlineData: {
                         mimeType: mimeType,
@@ -258,50 +261,68 @@ io.on('connection', (socket) => {
             }
 
             // Send input to the chat session
-            const result = await currentChat.sendMessage(contents); 
-            
+            const result = await currentChat.sendMessage(contents);
+
             const response = result.response;
             const aiText = response.text();
-            
-            // --- Function Calling Logic ---
+
+            // --- Function Calling Logic (IMPROVED) ---
             if (response.functionCall) {
                 const call = response.functionCall;
                 console.log(`AI wants to call function: ${call.name} with args:`, call.args);
 
-                if (availableTools[call.name]) {
-                    // Call the function using spread operator for arguments
-                    const toolResponse = availableTools[call.name](...Object.values(call.args));
-                    console.log("Tool execution result:", toolResponse);
+                // Add robust validation for functionCall
+                const requestedToolName = call.name ? String(call.name).trim() : ''; // Ensure it's a string, then trim
+                const toolArgs = call.args || {}; // Ensure args is an object, default to empty object
 
-                    // Send the tool response back to the AI model
-                    const toolResultResponse = await currentChat.sendMessage([ 
-                        {
-                            functionResponse: {
-                                name: call.name,
-                                response: toolResponse // Send the result of the tool execution
+                if (requestedToolName && availableTools.hasOwnProperty(requestedToolName)) {
+                    // Convert toolArgs from a plain object to an array of values for the function call
+                    // This assumes the order of args in the model's call matches the function definition's expected order
+                    // For more complex cases, you might map args by name if function signature allows an object
+                    const argsArray = Object.keys(toolArgs).map(key => toolArgs[key]);
+
+                    try {
+                        // Call the function using spread operator for arguments
+                        const toolResponse = availableTools[requestedToolName](...argsArray);
+                        console.log("Tool execution result:", toolResponse);
+
+                        // Send the tool response back to the AI model
+                        const toolResultResponse = await currentChat.sendMessage([
+                            {
+                                functionResponse: {
+                                    name: requestedToolName,
+                                    response: toolResponse // Send the result of the tool execution
+                                }
                             }
-                        }
-                    ]);
+                        ]);
 
-                    const finalAiText = toolResultResponse.response.text();
-                    socket.emit('receive_message', {
-                        author: 'Legacy', 
-                        message: finalAiText,
-                        time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-                    });
+                        const finalAiText = toolResultResponse.response.text();
+                        socket.emit('receive_message', {
+                            author: 'Legacy',
+                            message: finalAiText,
+                            time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                        });
+                    } catch (toolExecError) {
+                        console.error(`Error executing tool ${requestedToolName}:`, toolExecError);
+                        socket.emit('receive_message', {
+                            author: 'Legacy',
+                            message: `I encountered an error trying to use the "${requestedToolName}" tool. Please try again.`,
+                            time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                        });
+                    }
 
                 } else {
-                    console.warn(`Attempted to call unknown tool: ${call.name}`);
+                    console.warn(`Attempted to call invalid, unknown, or malformed tool: "${requestedToolName}". Full call object:`, call);
                     socket.emit('receive_message', {
-                        author: 'Legacy', 
-                        message: `I tried to perform an action, but the tool "${call.name}" is not available.`,
+                        author: 'Legacy',
+                        message: `I tried to perform an action, but the tool "${requestedToolName || 'unknown'}" is not available or its call was malformed.`,
                         time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
                     });
                 }
             } else {
                 // If no function call, send the AI's direct text response
                 socket.emit('receive_message', {
-                    author: 'Legacy', 
+                    author: 'Legacy',
                     message: aiText,
                     time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
                 });
@@ -326,9 +347,9 @@ io.on('connection', (socket) => {
             } else {
                  errorMessage = `AI error: ${error.message}. Check backend logs.`;
             }
-           
+
             const errorMessageData = {
-                author: 'Legacy', 
+                author: 'Legacy',
                 message: errorMessage,
                 time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
             };
