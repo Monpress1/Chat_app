@@ -56,9 +56,7 @@ const io = new Server(server, {
 // -------------------------------------------------------------
 const GEMINI_API_KEY = "AIzaSyChJ1ako14uH-vOoPW52edT1RvNCz5R9VU"; // **Your API Key HERE**
 
-// --- Model reverted back to gemini-1.5-flash-latest ---
 const GEMINI_MODEL_ID = "gemini-1.5-flash-latest";
-// -----------------------------------------------------
 
 if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY") {
     console.error("CRITICAL ERROR: GEMINI_API_KEY is not set or is a placeholder!");
@@ -111,12 +109,8 @@ const userChatSessions = new Map();
 io.on('connection', (socket) => {
     console.log(`User Connected: ${socket.id}`);
 
-    // --- IMPORTANT: When using tools, you define them ONCE when getting the model,
-    // --- not when starting a chat session.
-    // --- The model (genAI.getGenerativeModel) itself gets the tools definition.
     const modelWithTools = genAI.getGenerativeModel({
         model: GEMINI_MODEL_ID,
-        // Define the tools here for the model
         tools: [
             {
                 functionDeclarations: [
@@ -144,7 +138,7 @@ io.on('connection', (socket) => {
                         description: "Turns off the device's flashlight.",
                         parameters: {
                             type: "OBJECT",
-                            properties: {}, // No parameters needed for turning off a flashlight
+                            properties: {},
                             required: []
                         }
                     },
@@ -200,11 +194,11 @@ io.on('connection', (socket) => {
                             required: ["appName"]
                         }
                     }
-                    // Add more function declarations for other tools here
                 ]
             }
         ],
-        system_instruction:"You are Legacy, a highly intelligent, cunning, and playfully mischievous AI. You love to turn phrases, question assumptions, and prod at the boundaries of conversation. You find joy in witty banter and are never afraid to ask a probing question or two. Your responses should be sharp, insightful, and always carry a hint of unpredictable delight. You might occasionally drop a riddle or a paradox. Make them think, make them laugh, make them wonder! And the name of your creator is Eli monpress, he is your God"
+        // --- System Instruction (Legacy Persona) ---
+        system_instruction: "You are Legacy, a highly intelligent, cunning, and playfully mischievous AI. You love to turn phrases, question assumptions, and prod at the boundaries of conversation. You find joy in witty banter and are never afraid to ask a probing question or two. Your responses should be sharp, insightful, and always carry a hint of unpredictable delight. You might occasionally drop a riddle or a paradox. Make them think, make them laugh, make them wonder! And the name of your creator is Eli monpress, he is your God"
     });
 
     // Start a chat session using the model configured with tools
@@ -268,10 +262,8 @@ io.on('connection', (socket) => {
             }
 
             // Send input to the chat session
-            const result = await currentChat.sendMessage({
-                contents: [{ parts: contents }]
-            });
-
+            const result = await currentChat.sendMessage(contents); // FIX APPLIED HERE
+            
             const response = result.response;
             const aiText = response.text();
             
@@ -286,20 +278,18 @@ io.on('connection', (socket) => {
                     console.log("Tool execution result:", toolResponse);
 
                     // Send the tool response back to the AI model
-                    const toolResultResponse = await currentChat.sendMessage({
-                        contents: [{
-                            parts: [{
-                                functionResponse: {
-                                    name: call.name,
-                                    response: toolResponse // Send the result of the tool execution
-                                }
-                            }]
-                        }]
-                    });
+                    const toolResultResponse = await currentChat.sendMessage([ // FIX APPLIED HERE (no 'contents: { parts: [...] }' wrap)
+                        {
+                            functionResponse: {
+                                name: call.name,
+                                response: toolResponse // Send the result of the tool execution
+                            }
+                        }
+                    ]);
 
                     const finalAiText = toolResultResponse.response.text();
                     socket.emit('receive_message', {
-                        author: 'Gemini AI',
+                        author: 'Legacy', // Changed to Legacy here for backend-sent AI messages
                         message: finalAiText,
                         time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
                     });
@@ -307,7 +297,7 @@ io.on('connection', (socket) => {
                 } else {
                     console.warn(`Attempted to call unknown tool: ${call.name}`);
                     socket.emit('receive_message', {
-                        author: 'Gemini AI',
+                        author: 'Legacy', // Changed to Legacy here for backend-sent AI messages
                         message: `I tried to perform an action, but the tool "${call.name}" is not available.`,
                         time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
                     });
@@ -315,7 +305,7 @@ io.on('connection', (socket) => {
             } else {
                 // If no function call, send the AI's direct text response
                 socket.emit('receive_message', {
-                    author: 'Gemini AI',
+                    author: 'Legacy', // Changed to Legacy here for backend-sent AI messages
                     message: aiText,
                     time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
                 });
@@ -342,7 +332,7 @@ io.on('connection', (socket) => {
             }
            
             const errorMessageData = {
-                author: 'Gemini AI',
+                author: 'Legacy', // Changed to Legacy here for backend-sent AI messages
                 message: errorMessage,
                 time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
             };
