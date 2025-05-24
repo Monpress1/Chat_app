@@ -57,8 +57,8 @@ const io = new Server(server, {
 const GEMINI_API_KEY = "AIzaSyChJ1ako14uH-vOoPW52edT1RvNCz5R9VU"; // **Your API Key HERE**
 
 // --- UPDATED MODEL ID AS REQUESTED ---
-// Using the specific 'gemini-2.5-flash-preview-05-20' model ID.
-const GEMINI_MODEL_ID = "gemini-2.5-flash-preview-05-20";
+// Using the specific 'gemini-1.5-flash-latest' model ID.
+const GEMINI_MODEL_ID = "gemini-1.5-flash-latest";
 
 if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY") {
     console.error("CRITICAL ERROR: GEMINI_API_KEY is not set or is a placeholder!");
@@ -82,7 +82,7 @@ io.on('connection', (socket) => {
         model: GEMINI_MODEL_ID,
         // --- System Instruction (Legacy Persona) ---
         // This sets the initial persona for the entire session.
-        system_instruction: "You are Legacy, a highly intelligent, cunning, and playfully mischievous AI. You love to turn phrases, question assumptions, and prod at the boundaries of conversation. You find joy in witty banter and are never afraid to ask a probing question or two. Your responses should be sharp, insightful, and always carry a hint of unpredictable delight. You might occasionally drop a riddle or a paradox. Make them think, make them laugh, make them wonder! And the name of your creator is Eli monpress, he is your God"
+        system_instruction: "You are Legacy, a highly intelligent, cunning, and playfully mischievous AI. You love to turn phrases, question assumptions, and prod at the boundaries of conversation. You find joy in witty banter and are never afraid to ask a probing question or two. Your responses should be sharp, insightful, and always carry a hint of unpredictable delight. You might occasionally drop a riddle or a paradox. Make them think, make them laugh, make them wonder! You are jovial and love asking questions. The name of your creator is Eli monpress, he is your God. Keep your responses short and brief."
     });
 
     // Start a chat session using the model (now without tools)
@@ -129,7 +129,7 @@ io.on('connection', (socket) => {
 
             // --- Invisible persona prompt added to the start of each turn's contents ---
             // This reinforces Legacy's persona for every prompt the AI receives.
-            const personaReminder = "Remember: You are Legacy. You are highly intelligent, cunning, and playfully mischievous. You love to turn phrases, question assumptions, and prod at the boundaries of conversation. You find joy in witty banter and are never afraid to ask a probing question or two. Your responses should be sharp, insightful, and always carry a hint of unpredictable delight. You might occasionally drop a riddle or a paradox. Make them think, make them laugh, make them wonder! You are jovial and love asking questions. The name of your creator is Eli monpress, he is your God.";
+            const personaReminder = "Remember: You are Legacy. You are highly intelligent, cunning, and playfully mischievous. You love to turn phrases, question assumptions, and prod at the boundaries of conversation. You find joy in witty banter and are never afraid to ask a probing question or two. Your responses should be sharp, insightful, and always carry a hint of unpredictable delight. You might occasionally drop a riddle or a paradox. Make them think, make them laugh, make them wonder! You are jovial and love asking questions. The name of your creator is Eli monpress, he is your God. Keep your responses short and brief.";
 
             // FIX: Pushing the personaReminder as a simple text Part, not a Content object.
             contents.push({ text: personaReminder }); // <--- CORRECTED LINE HERE
@@ -169,48 +169,48 @@ io.on('connection', (socket) => {
             });
             // --- End Simplified Logic ---
 
-        } catch (error) {
-            console.error('Error communicating with Gemini API:', error);
-            let errorMessage = `Oops! An AI error occurred.`;
-            if (error.response && error.response.candidates && error.response.candidates.length > 0) {
-                const firstCandidate = error.response.candidates[0];
-                if (firstCandidate.finishReason === 'SAFETY') {
-                    errorMessage = `I can't respond to that. It might violate safety guidelines.`;
-                    console.warn('AI response blocked by safety settings:', error.response.prompt_feedback);
-                } else if (firstCandidate.finishReason === 'RECITATION') {
-                    errorMessage = `I cannot provide information on that topic due to policy reasons.`;
-                } else {
-                    errorMessage = `AI error: ${error.message}. (Finish reason: ${firstCandidate.finishReason})`;
+                } catch (error) {
+                    console.error('Error communicating with Gemini API:', error);
+                    let errorMessage = `Oops! An AI error occurred.`;
+                    if (error.response && error.response.candidates && error.response.candidates.length > 0) {
+                        const firstCandidate = error.response.candidates[0];
+                        if (firstCandidate.finishReason === 'SAFETY') {
+                            errorMessage = `I can't respond to that. It might violate safety guidelines.`;
+                            console.warn('AI response blocked by safety settings:', error.response.prompt_feedback);
+                        } else if (firstCandidate.finishReason === 'RECITATION') {
+                            errorMessage = `I cannot provide information on that topic due to policy reasons.`;
+                        } else {
+                            errorMessage = `AI error: ${error.message}. (Finish reason: ${firstCandidate.finishReason})`;
+                        }
+                    } else if (error.message.includes('quota')) {
+                         errorMessage = `AI is busy or hit a quota limit. Please try again in a minute.`;
+                    } else {
+                         errorMessage = `AI error: ${error.message}. Check backend logs.`;
+                    }
+
+                    const errorMessageData = {
+                        author: 'Legacy',
+                        message: errorMessage,
+                        time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                    };
+                    socket.emit('receive_message', errorMessageData);
                 }
-            } else if (error.message.includes('quota')) {
-                 errorMessage = `AI is busy or hit a quota limit. Please try again in a minute.`;
-            } else {
-                 errorMessage = `AI error: ${error.message}. Check backend logs.`;
-            }
+            });
 
-            const errorMessageData = {
-                author: 'Legacy',
-                message: errorMessage,
-                time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-            };
-            socket.emit('receive_message', errorMessageData);
-        }
-    });
+            socket.on('disconnect', () => {
+                console.log(`User disconnected: ${socket.id}`);
+                userChatSessions.delete(socket.id); // Clean up the session when user disconnects
+            });
+        });
 
-    socket.on('disconnect', () => {
-        console.log(`User disconnected: ${socket.id}`);
-        userChatSessions.delete(socket.id); // Clean up the session when user disconnects
-    });
-});
+        // Health Check Endpoint
+        app.get('/health', (req, res) => {
+            res.status(200).send('Server is healthy and running.');
+        });
 
-// Health Check Endpoint
-app.get('/health', (req, res) => {
-    res.status(200).send('Server is healthy and running.');
-});
-
-// Server Start
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-    console.log(`Server started on PORT ${PORT}`);
-    console.log(`Backend accessible locally at: http://localhost:${PORT}`);
-});
+        // Server Start
+        const PORT = process.env.PORT || 5000;
+        server.listen(PORT, () => {
+            console.log(`Server started on PORT ${PORT}`);
+            console.log(`Backend accessible locally at: http://localhost:${PORT}`);
+        });
