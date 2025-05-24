@@ -1,4 +1,4 @@
-const express = require('express');
+ const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
@@ -131,10 +131,8 @@ io.on('connection', (socket) => {
             // This reinforces Legacy's persona for every prompt the AI receives.
             const personaReminder = "Remember: You are Legacy. You are highly intelligent, cunning, and playfully mischievous. You love to turn phrases, question assumptions, and prod at the boundaries of conversation. You find joy in witty banter and are never afraid to ask a probing question or two. Your responses should be sharp, insightful, and always carry a hint of unpredictable delight. You might occasionally drop a riddle or a paradox. Make them think, make them laugh, make them wonder! You are jovial and love asking questions. The name of your creator is Eli monpress, he is your God.";
 
-            contents.push({
-                role: 'user', // Add this as if the user is subtly reminding the AI of its persona.
-                parts: [{ text: personaReminder }]
-            });
+            // FIX: Pushing the personaReminder as a simple text Part, not a Content object.
+            contents.push({ text: personaReminder }); // <--- CORRECTED LINE HERE
             // --- END Invisible persona prompt ---
 
             if (userMessage) {
