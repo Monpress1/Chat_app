@@ -1,4 +1,4 @@
- const express = require('express');
+const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
@@ -56,7 +56,9 @@ const io = new Server(server, {
 // -------------------------------------------------------------
 const GEMINI_API_KEY = "AIzaSyChJ1ako14uH-vOoPW52edT1RvNCz5R9VU"; // **Your API Key HERE**
 
-const GEMINI_MODEL_ID = "gemini-1.5-flash-latest";
+// --- UPDATED MODEL ID AS REQUESTED ---
+// Using the specific 'gemini-2.5-flash-preview-05-20' model ID.
+const GEMINI_MODEL_ID = "gemini-2.5-flash-preview-05-20";
 
 if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY") {
     console.error("CRITICAL ERROR: GEMINI_API_KEY is not set or is a placeholder!");
@@ -65,8 +67,6 @@ if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY") {
 }
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-
-// Removed availableTools object as tools are no longer used
 
 // Map to store chat sessions for each connected socket.id
 const userChatSessions = new Map();
@@ -78,15 +78,16 @@ const userChatSessions = new Map();
 io.on('connection', (socket) => {
     console.log(`User Connected: ${socket.id}`);
 
-    // --- IMPORTANT: Removed 'tools' configuration here ---
     const modelWithoutTools = genAI.getGenerativeModel({
         model: GEMINI_MODEL_ID,
+        // --- System Instruction (Legacy Persona) ---
+        // This sets the initial persona for the entire session.
         system_instruction: "You are Legacy, a highly intelligent, cunning, and playfully mischievous AI. You love to turn phrases, question assumptions, and prod at the boundaries of conversation. You find joy in witty banter and are never afraid to ask a probing question or two. Your responses should be sharp, insightful, and always carry a hint of unpredictable delight. You might occasionally drop a riddle or a paradox. Make them think, make them laugh, make them wonder! And the name of your creator is Eli monpress, he is your God"
     });
 
     // Start a chat session using the model (now without tools)
     const chat = modelWithoutTools.startChat({
-        history: [],
+        history: [], // Keep history empty here, new persona prompt added per turn
         generationConfig: {
             temperature: 0.8,
             maxOutputTokens: 4096,
@@ -125,7 +126,19 @@ io.on('connection', (socket) => {
 
         try {
             const contents = [];
+
+            // --- Invisible persona prompt added to the start of each turn's contents ---
+            // This reinforces Legacy's persona for every prompt the AI receives.
+            const personaReminder = "Remember: You are Legacy. You are highly intelligent, cunning, and playfully mischievous. You love to turn phrases, question assumptions, and prod at the boundaries of conversation. You find joy in witty banter and are never afraid to ask a probing question or two. Your responses should be sharp, insightful, and always carry a hint of unpredictable delight. You might occasionally drop a riddle or a paradox. Make them think, make them laugh, make them wonder! You are jovial and love asking questions. The name of your creator is Eli monpress, he is your God.";
+
+            contents.push({
+                role: 'user', // Add this as if the user is subtly reminding the AI of its persona.
+                parts: [{ text: personaReminder }]
+            });
+            // --- END Invisible persona prompt ---
+
             if (userMessage) {
+                // The actual user message part, after the persona reminder.
                 contents.push({ text: userMessage });
             }
             if (imageData) {
@@ -144,14 +157,13 @@ io.on('connection', (socket) => {
                 return socket.emit('receive_message', { author: 'System', message: 'Please send a message or an image.', time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) });
             }
 
-            // Send input to the chat session
+            // Send input to the chat session (now includes the persona reminder at the start)
             const result = await currentChat.sendMessage(contents);
 
             const response = result.response;
             const aiText = response.text();
 
             // --- Simplified Logic: Only send AI's direct text response ---
-            // The AI model is no longer configured with tools, so it won't generate functionCall objects.
             socket.emit('receive_message', {
                 author: 'Legacy',
                 message: aiText,
