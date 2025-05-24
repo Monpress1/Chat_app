@@ -24,7 +24,7 @@ const ChatWithAI = () => {
     const [isCallMode, setIsCallMode] = useState(false); // State to control voice mode
     const [imageFile, setImageFile] = useState(null);
     const [imagePreview, setImagePreview] = useState(null);
-    const [isSpeaking, setIsSpeaking] = useState(false);
+    const [isSpeaking, setIsSpeaking] = useState(false); // Tracks if any speech is ongoing
 
     const chatContainerRef = useRef(null); // Ref for scrolling to bottom
     const currentRecognitionRef = useRef(null); // Ref to hold current recognition instance
@@ -54,7 +54,7 @@ const ChatWithAI = () => {
             console.log('Received message:', data);
             setMessages((prevMessages) => [...prevMessages, data]);
 
-            // If in call mode and AI sends a text message, speak it
+            // If in call mode and AI sends a text message, speak it automatically
             if (isCallMode && data.author === 'Legacy' && data.message) {
                 speakText(data.message);
             }
@@ -68,6 +68,10 @@ const ChatWithAI = () => {
                 currentRecognitionRef.current = null;
             }
             setIsListening(false);
+            // Ensure any ongoing speech is cancelled
+            if (SpeechSynthesis.speaking) {
+                SpeechSynthesis.cancel();
+            }
             setIsSpeaking(false);
         });
 
@@ -84,6 +88,11 @@ const ChatWithAI = () => {
         if (!SpeechSynthesis) {
             console.warn("Speech Synthesis not supported in this browser.");
             return;
+        }
+
+        // Stop any ongoing speech before starting a new one
+        if (SpeechSynthesis.speaking) {
+            SpeechSynthesis.cancel();
         }
 
         setIsSpeaking(true);
@@ -151,7 +160,7 @@ const ChatWithAI = () => {
         };
 
         return newRecognition;
-    }, [imageFile]);
+    }, [isCallMode, imageFile, sendMessage]);
 
 
     // Start Listening function
@@ -343,15 +352,30 @@ const ChatWithAI = () => {
                                 msg.author === 'You'
                                     ? 'bg-blue-500 text-white rounded-br-none'
                                     : 'bg-gray-200 text-gray-800 rounded-bl-none'
-                            }`}>
-                                <p className="font-semibold text-sm mb-1">{msg.author}</p>
+                            } ${msg.author === 'Legacy' && !isCallMode ? 'flex items-center gap-2' : ''}`}> {/* Added flex and gap for Legacy's message bubble */}
+                                {msg.message && <p className={msg.author === 'You' ? "font-semibold text-sm mb-1" : "font-semibold text-sm"}>{msg.author}</p>}
                                 {msg.message && <p>{msg.message}</p>}
                                 {msg.image && (
                                     <div className="mt-2">
                                         <img src={msg.image} alt="User Upload" className="max-w-xs h-auto rounded-md border border-gray-300" />
                                     </div>
                                 )}
-                                <p className="text-xs mt-1 opacity-75 text-right">{msg.time}</p>
+                                <div className="flex justify-between items-center mt-1">
+                                    <p className="text-xs opacity-75">{formatTime(msg.time)}</p>
+                                    {/* Read button for Legacy's messages in text mode */}
+                                    {msg.author === 'Legacy' && !isCallMode && (
+                                        <button
+                                            onClick={() => speakText(msg.message)}
+                                            className={`ml-2 p-1 rounded-full text-white transition-colors duration-200 ${
+                                                isSpeaking ? 'bg-gray-400 cursor-not-allowed' : 'bg-purple-500 hover:bg-purple-600'
+                                            }`}
+                                            title="Read Message"
+                                            disabled={isSpeaking}
+                                        >
+                                            <FontAwesomeIcon icon={faVolumeHigh} className="text-xs" />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     ))}
