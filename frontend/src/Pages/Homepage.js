@@ -1,316 +1,314 @@
  import React, { useState, useEffect, useRef, useCallback } from 'react';
 import io from 'socket.io-client';
-import ScrollToBottom from 'react-scroll-to-bottom';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faMicrophone, faStop, faPaperPlane, faImage, faTimes, faVolumeHigh } from '@fortawesome/free-solid-svg-icons';
 
-// ---------------------------------------------------------------
-// IMPORTANT: Replace with your actual Render backend URL
-// ---------------------------------------------------------------
-const BACKEND_URL = 'https://chat-app-lqcw.onrender.com'; // <--- CONFIRM THIS IS YOUR BACKEND URL
+// -------------------------------------------------------------
+// CONFIGURE BACKEND URL
+// IMPORTANT: Replace with your ACTUAL Render backend URL
+// -------------------------------------------------------------
+const BACKEND_URL = "https://chat-app-backend-eli-monpresss-projects.vercel.app"; // <--- CONFIRM THIS IS YOUR RENDER BACKEND URL
 
-// Initialize the socket connection globally to persist across renders
-const socket = io.connect(BACKEND_URL);
+// -------------------------------------------------------------
+// Voice Recognition & Synthesis Setup (Web Speech API)
+// -------------------------------------------------------------
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const SpeechSynthesis = window.speechSynthesis;
 
 const ChatWithAI = () => {
-    const [isConnected, setIsConnected] = useState(false);
-    const [currentMessage, setCurrentMessage] = useState('');
-    const [messageList, setMessageList] = useState(() => {
-        try {
-            const storedMessages = localStorage.getItem('legacyChatMessages');
-            return storedMessages ? JSON.parse(storedMessages) : [];
-        } catch (error) {
-            console.error("Failed to parse messages from local storage:", error);
-            return [];
-        }
-    });
-    const [isCallMode, setIsCallMode] = useState(true);
+    const [message, setMessage] = useState('');
+    const [messages, setMessages] = useState([]);
+    const [socket, setSocket] = useState(null);
     const [isListening, setIsListening] = useState(false);
+    const [recognition, setRecognition] = useState(null);
+    const [isCallMode, setIsCallMode] = useState(false); // State to control voice mode
+    const [imageFile, setImageFile] = useState(null);
     const [imagePreview, setImagePreview] = useState(null);
-    const [imageData, setImageData] = useState(null); // Base64 image data
+    const [isSpeaking, setIsSpeaking] = useState(false);
 
-    const recognitionRef = useRef(null);
-    const silenceTimeoutRef = useRef(null);
-    const awaitingAiResponseRef = useRef(false); // To track if we're waiting for AI
-    const lastUserMessageTimeRef = useRef(null); // To prevent re-adding user message from backend mirror
+    const chatContainerRef = useRef(null); // Ref for scrolling to bottom
+    const currentRecognitionRef = useRef(null); // Ref to hold current recognition instance
 
-    // --- LOCAL STORAGE EFFECT: Save messages to localStorage whenever messageList changes ---
+    // Function to format timestamp
+    const formatTime = (date) => {
+        return new Date(date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    };
+
+    // Auto-scroll to the bottom of the chat
     useEffect(() => {
-        try {
-            localStorage.setItem('legacyChatMessages', JSON.stringify(messageList));
-        } catch (error) {
-            console.error("Failed to save messages to local storage:", error);
+        if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
-    }, [messageList]);
+    }, [messages]); // Scroll whenever messages change
 
-    // --- Speech Recognition Setup & Control ---
-    const startListening = useCallback(() => {
-        if (!recognitionRef.current) {
-            console.warn("Speech Recognition API not initialized.");
+    // Initialize Socket.IO connection
+    useEffect(() => {
+        const newSocket = io(BACKEND_URL);
+        setSocket(newSocket);
+
+        newSocket.on('connect', () => {
+            console.log('Connected to backend Socket.IO');
+        });
+
+        newSocket.on('receive_message', (data) => {
+            console.log('Received message:', data);
+            setMessages((prevMessages) => [...prevMessages, data]);
+
+            // If in call mode and AI sends a text message, speak it
+            if (isCallMode && data.author === 'Legacy' && data.message) {
+                speakText(data.message);
+            }
+        });
+
+        newSocket.on('disconnect', () => {
+            console.log('Disconnected from backend Socket.IO');
+            // Clean up recognition on disconnect if needed
+            if (currentRecognitionRef.current) {
+                currentRecognitionRef.current.stop();
+                currentRecognitionRef.current = null;
+            }
+            setIsListening(false);
+            setIsSpeaking(false);
+        });
+
+        return () => {
+            if (newSocket) {
+                newSocket.disconnect();
+            }
+        };
+    }, [isCallMode]); // Re-initialize socket if call mode changes (if needed, or just manage recognition within)
+
+
+    // Text to Speech (AI Speaking)
+    const speakText = useCallback((text) => {
+        if (!SpeechSynthesis) {
+            console.warn("Speech Synthesis not supported in this browser.");
             return;
         }
-        if (isConnected && isCallMode && !isListening && !awaitingAiResponseRef.current) {
-            try {
-                recognitionRef.current.start();
-                setIsListening(true);
-                console.log('Speech recognition started...');
-            } catch (e) {
-                // Catch errors like "recognition already started"
-                if (e.message !== "recognition already started") {
-                    console.error("Error starting speech recognition:", e);
-                }
-                setIsListening(true); // Still set to true if it's already started
-            }
-        }
-    }, [isConnected, isCallMode, isListening]);
 
-    const stopListening = useCallback(() => {
-        if (recognitionRef.current && isListening) {
-            recognitionRef.current.stop();
+        setIsSpeaking(true);
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0; // Normal speed
+        utterance.pitch = 1.0; // Normal pitch
+
+        utterance.onend = () => {
+            setIsSpeaking(false);
+            if (isCallMode && recognition) {
+                // Restart listening after AI finishes speaking in call mode
+                startListening();
+            }
+        };
+        utterance.onerror = (event) => {
+            console.error('SpeechSynthesisUtterance.onerror', event);
+            setIsSpeaking(false);
+            if (isCallMode && recognition) {
+                startListening(); // Attempt to restart even on error
+            }
+        };
+
+        SpeechSynthesis.speak(utterance);
+    }, [isCallMode, recognition]);
+
+
+    // Speech Recognition (Mic Listening)
+    const setupRecognition = useCallback(() => {
+        if (!SpeechRecognition) {
+            console.warn("Speech Recognition not supported in this browser.");
+            return null;
+        }
+
+        const newRecognition = new SpeechRecognition();
+        newRecognition.continuous = false; // Only get one result per start
+        newRecognition.interimResults = false; // Only final results
+        newRecognition.lang = 'en-US'; // Set language
+
+        newRecognition.onstart = () => {
+            setIsListening(true);
+            console.log('Voice recognition started...');
+        };
+
+        newRecognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            console.log('Transcript:', transcript);
+            setMessage(transcript); // Set transcript to input field
+            // Automatically send message after result
+            sendMessage(transcript, imageFile); // Send collected text
+        };
+
+        newRecognition.onend = () => {
+            console.log('Voice recognition ended.');
             setIsListening(false);
-            clearTimeout(silenceTimeoutRef.current);
-            console.log('Speech recognition stopped.');
+            // Don't auto-restart here in text mode, wait for AI reply in call mode
+        };
+
+        newRecognition.onerror = (event) => {
+            console.error('Speech recognition error', event);
+            setIsListening(false);
+            if (isCallMode && event.error !== 'no-speech') {
+                // Only try to restart if it's not a 'no-speech' error in call mode
+                setTimeout(startListening, 500); // Give a small delay before restarting
+            }
+        };
+
+        return newRecognition;
+    }, [imageFile]);
+
+
+    // Start Listening function
+    const startListening = useCallback(() => {
+        if (!recognition) {
+            const rec = setupRecognition();
+            setRecognition(rec);
+            currentRecognitionRef.current = rec;
+            if (rec) rec.start();
+        } else {
+            // Stop any existing recognition before starting new one
+            if (isListening && currentRecognitionRef.current) {
+                currentRecognitionRef.current.stop();
+            }
+            recognition.start();
+        }
+    }, [recognition, isListening, setupRecognition]);
+
+
+    // Stop Listening function
+    const stopListening = useCallback(() => {
+        if (isListening && currentRecognitionRef.current) {
+            currentRecognitionRef.current.stop();
         }
     }, [isListening]);
 
-    useEffect(() => {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            console.warn("Web Speech API not supported in this browser. Voice features will be disabled.");
-            setIsCallMode(false);
-            return;
-        }
 
-        recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = false; // Set to false for single utterances
-        recognitionRef.current.interimResults = false;
-        recognitionRef.current.lang = 'en-US';
-
-        let interimTranscript = ''; // Use a local variable for building transcript
-
-        recognitionRef.current.onstart = () => {
-            setIsListening(true);
-            interimTranscript = '';
-            console.log('Recognition onstart: Mic is now listening.');
-        };
-
-        recognitionRef.current.onresult = (event) => {
-            clearTimeout(silenceTimeoutRef.current); // Reset silence timeout on speech
-            const last = event.results.length - 1;
-            const segment = event.results[last][0].transcript;
-
-            // Only update interimTranscript if continuous is true or handling multiple onresult events
-            // For continuous=false, onresult is typically called once with final result
-            interimTranscript += segment;
-
-            // Immediately stop listening after getting a result (for single utterance)
-            // This is crucial for the turn-taking in smart voice flow
-            if (event.results[last].isFinal) {
-                stopListening(); // Stop mic as soon as final result is received
-                console.log("Recognition onresult: Final result received, mic stopped.");
-                if (interimTranscript.trim()) {
-                    sendMessage(interimTranscript.trim(), true);
-                }
-                interimTranscript = ''; // Reset for next utterance
-            }
-        };
-
-        recognitionRef.current.onend = () => {
-            setIsListening(false);
-            console.log('Recognition onend: Mic has turned off.');
-            // Only restart listening if we're in call mode AND not awaiting AI response
-            // AI response handler will restart it if needed
-            if (isCallMode && !awaitingAiResponseRef.current) {
-                console.log("Recognition onend: Restarting mic after a brief pause.");
-                setTimeout(() => { // Small delay to prevent immediate restart issues
-                    if (isCallMode && !awaitingAiResponseRef.current) {
-                        startListening();
-                    }
-                }, 500);
-            }
-        };
-
-        recognitionRef.current.onerror = (event) => {
-            console.error('Speech recognition error:', event.error);
-            setIsListening(false);
-            clearTimeout(silenceTimeoutRef.current);
-            if (event.error === 'not-allowed') {
-                alert("Microphone access denied. Please enable it in your browser settings to use voice chat.");
-                setIsCallMode(false);
-            } else if (event.error === 'no-speech') {
-                console.log("No speech detected after start, trying again...");
-                // Allow it to try again if no speech was detected
-                if (isCallMode && !awaitingAiResponseRef.current) {
-                    setTimeout(() => {
-                        startListening();
-                    }, 500);
-                }
+    // Toggle Call Mode (Voice Chat)
+    const toggleCallMode = () => {
+        setIsCallMode(prev => !prev);
+        if (!isCallMode) { // If turning ON call mode
+            // Immediately start listening when entering call mode
+            if (!recognition) {
+                const rec = setupRecognition();
+                setRecognition(rec);
+                currentRecognitionRef.current = rec;
+                if (rec) rec.start();
             } else {
-                // For other errors, try to restart if still in call mode and not awaiting AI
-                if (isCallMode && !awaitingAiResponseRef.current) {
-                    console.log("Recognition onerror: Attempting to restart mic.");
-                    setTimeout(() => {
-                        startListening();
-                    }, 1000);
+                 // Stop any existing recognition before starting new one
+                if (isListening && currentRecognitionRef.current) {
+                    currentRecognitionRef.current.stop();
                 }
+                recognition.start();
             }
-        };
-
-        // Cleanup on unmount
-        return () => {
-            if (recognitionRef.current) {
-                recognitionRef.current.stop();
-                clearTimeout(silenceTimeoutRef.current);
-            }
-        };
-    }, [isCallMode, isConnected, startListening, stopListening]); // Added dependencies
-
-    // --- Socket Connection & Auto Mic on Load ---
-    useEffect(() => {
-        socket.on('connect', () => {
-            setIsConnected(true);
-            console.log('Frontend: Connected to AI chat server!');
-            if (isCallMode) {
-                startListening(); // Auto mic on load (if in call mode)
-            }
-        });
-
-        socket.on('disconnect', () => {
-            setIsConnected(false);
-            console.log('Frontend: Disconnected from AI chat server.');
+        } else { // If turning OFF call mode
             stopListening();
-        });
-
-        socket.on('connect_error', (error) => {
-            console.error('Frontend: Socket connection error:', error);
-            setIsConnected(false);
-            stopListening();
-        });
-
-        return () => {
-            socket.off('connect');
-            socket.off('disconnect');
-            socket.off('connect_error');
-        };
-    }, [isCallMode, startListening, stopListening]);
-
-    // --- Message Receiving & Smart Voice Flow ---
-    useEffect(() => {
-        socket.on('receive_message', (data) => {
-            // FIX: Prevent duplicate user messages.
-            // Backend mirrors user messages, so we only add AI messages here
-            // or user messages if they haven't been added yet (e.g., from text input)
-            if (data.author === 'Legacy') {
-                setMessageList((list) => {
-                    // Only add if it's not already the very last message (simple duplicate check)
-                    if (list.length > 0 && list[list.length - 1].message === data.message && list[list.length - 1].author === data.author) {
-                        return list; // Prevent exact duplicate AI message from being added again
-                    }
-                    return [...list, data];
-                });
-                awaitingAiResponseRef.current = false; // AI response received
-                if (isCallMode) {
-                    console.log("AI response received, restarting listening...");
-                    startListening(); // Restart mic after AI reply finishes
-                }
-            } else if (data.author === 'You') {
-                // This is a message echoed from the backend.
-                // We typically add user messages immediately on the frontend after sending.
-                // If you *don't* want the frontend to add the user message locally
-                // but wait for the backend mirror, then remove the 'You' message addition
-                // from the sendMessage function. For now, this just logs if we get it.
-                console.log("Received 'You' message mirror from backend:", data.message);
-                // We are relying on the local add in sendMessage for user messages
+            // Stop any ongoing speech synthesis
+            if (SpeechSynthesis.speaking) {
+                SpeechSynthesis.cancel();
             }
-        });
-
-        return () => {
-            socket.off('receive_message');
-        };
-    }, [socket, isCallMode, startListening]);
-
-
-    // --- Send Message Function (Modified for voice and image) ---
-    const sendMessage = async (messageToSend = currentMessage, isVoice = false) => {
-        const message = messageToSend.trim();
-        if (!message && !imageData) { // Ensure at least message or image exists
-            return;
+            setIsSpeaking(false);
         }
-
-        if (!isConnected) {
-            alert('Not connected to AI chat server. Please wait or check your internet connection.');
-            return;
-        }
-
-        // Add user message to list immediately on the frontend
-        // This is crucial for smooth UX and to prevent duplicates from backend echo
-        if (!isVoice || message.length > 0) { // Add voice message only if it's not empty
-            setMessageList((list) => {
-                const newMessage = {
-                    author: 'You',
-                    message: message,
-                    image: imageData, // Include image in your own message for display
-                    time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-                };
-                return [...list, newMessage];
-            });
-        }
-
-        // Clear input field and image after sending
-        setCurrentMessage('');
-        setImagePreview(null);
-        setImageData(null);
-
-        const messageData = {
-            message: message,
-            image: imageData, // Send image data to backend
-        };
-
-        awaitingAiResponseRef.current = true; // Set flag when message is sent to AI
-        stopListening(); // Stop mic when user sends message (for voice)
-
-        await socket.emit('send_message', messageData);
     };
 
-    // --- Image Upload Handling ---
-    const handleImageChange = (event) => {
-        const file = event.target.files[0];
+
+    // Auto Mic on Load (when component mounts, and in call mode)
+    useEffect(() => {
+        if (isCallMode) {
+            const rec = setupRecognition();
+            setRecognition(rec);
+            currentRecognitionRef.current = rec; // Store the ref
+            if (rec) rec.start(); // Start listening
+        }
+        // Cleanup function for unmounting
+        return () => {
+            if (currentRecognitionRef.current) {
+                currentRecognitionRef.current.stop();
+                currentRecognitionRef.current = null;
+            }
+            if (SpeechSynthesis.speaking) {
+                SpeechSynthesis.cancel();
+            }
+            setIsListening(false);
+            setIsSpeaking(false);
+        };
+    }, [isCallMode, setupRecognition]); // Depend on isCallMode and setupRecognition
+
+
+    // Send message to backend
+    const sendMessage = useCallback(async (text, image = null) => {
+        if (!socket) {
+            console.error('Socket not connected');
+            return;
+        }
+
+        const messageToSend = text || message; // Use passed text if available, else state message
+        if (!messageToSend && !image) return; // Don't send empty messages or no image
+
+        let imageData = null;
+        if (image) {
+            // Convert image file to Base64
+            const reader = new FileReader();
+            reader.readAsDataURL(image);
+            reader.onload = () => {
+                imageData = reader.result;
+                socket.emit('send_message', { message: messageToSend, image: imageData });
+                setMessage(''); // Clear input field
+                setImageFile(null); // Clear image file
+                setImagePreview(null); // Clear image preview
+            };
+            reader.onerror = (error) => {
+                console.error("Error converting image to Base64:", error);
+            };
+            return; // Exit here, actual emit happens in reader.onload
+        }
+
+        // For text-only messages or if image conversion isn't needed
+        socket.emit('send_message', { message: messageToSend, image: imageData });
+        setMessage(''); // Clear input field
+        setImageFile(null); // Clear image file
+        setImagePreview(null); // Clear image preview
+
+    }, [socket, message, imageFile]); // Include imageFile in dependencies
+
+
+    // Handle text input change
+    const handleMessageChange = (e) => {
+        setMessage(e.target.value);
+    };
+
+    // Handle Enter key press
+    const handleKeyPress = (e) => {
+        if (e.key === 'Enter') {
+            sendMessage(message, imageFile);
+        }
+    };
+
+    // Handle image file selection
+    const handleImageChange = (e) => {
+        const file = e.target.files[0];
         if (file) {
+            setImageFile(file);
             const reader = new FileReader();
             reader.onloadend = () => {
-                setImagePreview(reader.result); // For displaying preview
-                setImageData(reader.result);   // Base64 string to send
+                setImagePreview(reader.result);
             };
             reader.readAsDataURL(file);
-        } else {
-            setImagePreview(null);
-            setImageData(null);
         }
     };
 
-    // --- Mode Switching ---
-    const toggleMode = () => {
-        setIsCallMode(prevMode => {
-            const newMode = !prevMode;
-            if (newMode) { // Switching to Call Mode
-                startListening();
-            } else { // Switching to Chat Mode
-                stopListening();
-                setCurrentMessage(''); // Clear input when switching to text mode
-                setImagePreview(null); // Clear image when switching
-                setImageData(null);
-            }
-            return newMode;
-        });
+    // Clear selected image
+    const clearImage = () => {
+        setImageFile(null);
+        setImagePreview(null);
     };
 
     return (
+        // Conditional background styling based on isCallMode
         <div className="h-screen overflow-hidden flex items-center justify-center p-4"
-             style={{
-                 // 1. Gradient Dark Background
+             style={isCallMode ? { // Apply gradient ONLY if isCallMode is true
                  background: 'linear-gradient(135deg, #0A0A0A, #1A1A2E, #280C4F, #5D238A, #A64E30, #C2700D, #FDBB2D, #0A0A0A)', // Darker gradient
                  backgroundSize: '400% 400%',
                  animation: 'gradientAnimation 15s ease infinite',
+             } : { // Apply a simple light background if isCallMode is false
+                 background: '#F0F2F5', // A light grey for contrast in text mode
              }}>
-            {/* Add Keyframes for gradient animation */}
+            {/* Keyframes for gradient animation (always present, as it's only active when applied) */}
             <style>
                 {`
                 @keyframes gradientAnimation {
@@ -320,154 +318,103 @@ const ChatWithAI = () => {
                 }
                 `}
             </style>
-            <div className="flex h-full w-full max-w-2xl antialiased text-gray-800 flex-col rounded-2xl bg-white shadow-lg">
-                {/* Header */}
-                <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-blue-500 to-indigo-600 rounded-t-2xl">
-                    <h2 className="text-2xl font-bold text-white flex items-center">
-                        <svg className="w-8 h-8 mr-2 text-white" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"></path>
-                        </svg>
-                        Chat with Legacy
-                    </h2>
-                    <div className="flex items-center space-x-2">
-                        <div className={`text-sm font-semibold p-2 rounded-full ${isConnected ? 'bg-green-400 text-white' : 'bg-red-400 text-white'}`}>
-                            {isConnected ? 'Connected' : 'Connecting...'}
-                        </div>
-                        {/* Chat/Call Icon on Top Right */}
-                        <button
-                            onClick={toggleMode}
-                            className="p-2 rounded-full text-white hover:bg-white hover:text-indigo-600 transition duration-300"
-                            title={isCallMode ? "Switch to Text Chat" : "Switch to Voice Call"}
+
+            <div className="flex flex-col h-full w-full max-w-2xl bg-white shadow-xl rounded-lg overflow-hidden">
+                {/* Chat Header */}
+                <div className="p-4 bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-md flex items-center justify-between">
+                    <h1 className="text-xl font-bold">Legacy Chat</h1>
+                    <button
+                        onClick={toggleCallMode}
+                        className={`p-2 rounded-full text-white transition-all duration-300 ${isCallMode ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'}`}
+                        title={isCallMode ? 'Exit Voice Mode' : 'Enter Voice Mode'}
+                    >
+                        <FontAwesomeIcon icon={isCallMode ? faVolumeHigh : faMicrophone} />
+                    </button>
+                </div>
+
+                {/* Chat Messages Container */}
+                <div ref={chatContainerRef} className="flex-1 p-4 overflow-y-auto bg-gray-50">
+                    {messages.map((msg, index) => (
+                        <div
+                            key={index}
+                            className={`flex mb-3 ${msg.author === 'You' ? 'justify-end' : 'justify-start'}`}
                         >
-                            {isCallMode ? (
-                                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 6H6v-2h8v2zm4-4H6V7h12v2z"></path>
-                                </svg>
-                            ) : (
-                                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.2-3c0 2.88-2.39 5.2-5.2 5.2S6.8 13.88 6.8 11H5.2c0 3.18 2.57 5.76 5.8 6.15V21h2.2v-3.85c3.23-.39 5.8-2.97 5.8-6.15h-1.6z"></path>
-                                </svg>
-                            )}
-                        </button>
-                    </div>
-                </div>
-
-                {/* Messages Area */}
-                <div className="flex flex-col h-full overflow-y-auto p-4 flex-grow">
-                    <ScrollToBottom className="h-full w-full">
-                        <div className="flex flex-col space-y-4 pb-4"> {/* Added pb-4 for bottom padding */}
-                            {messageList.map((messageContent, index) => (
-                                <div key={index} className={`flex ${messageContent.author === 'You' ? 'justify-end' : 'justify-start'}`}>
-                                    <div className={`relative max-w-xs sm:max-w-md md:max-w-lg py-2 px-4 shadow rounded-xl ${
-                                        messageContent.author === 'You'
-                                            ? 'bg-blue-500 text-white rounded-br-none'
-                                            : 'bg-gray-200 text-gray-800 rounded-bl-none'
-                                    } font-sans text-base leading-relaxed`}> {/* Cleaner font & leading */}
-                                        <div className="text-sm font-semibold mb-1">
-                                            {messageContent.author === 'You' ? 'You' : 'Legacy'}
-                                        </div>
-                                        {messageContent.image && (
-                                            <img src={messageContent.image} alt="User Upload" className="max-w-full h-auto rounded-lg mb-2" />
-                                        )}
-                                        <div className="text-base break-words">{messageContent.message}</div>
-                                        <div className="text-xs text-right opacity-75 mt-1">
-                                            {messageContent.time}
-                                        </div>
+                            <div className={`max-w-[75%] px-4 py-2 rounded-lg shadow-md ${
+                                msg.author === 'You'
+                                    ? 'bg-blue-500 text-white rounded-br-none'
+                                    : 'bg-gray-200 text-gray-800 rounded-bl-none'
+                            }`}>
+                                <p className="font-semibold text-sm mb-1">{msg.author}</p>
+                                {msg.message && <p>{msg.message}</p>}
+                                {msg.image && (
+                                    <div className="mt-2">
+                                        <img src={msg.image} alt="User Upload" className="max-w-xs h-auto rounded-md border border-gray-300" />
                                     </div>
-                                </div>
-                            ))}
-                        </div>
-                    </ScrollToBottom>
-                </div>
-
-                {/* Message Input / Microphone Indicator */}
-                <div className="p-4 border-t border-gray-200 bg-gray-100 rounded-b-2xl">
-                    {isCallMode ? (
-                        <div className="flex items-center justify-center h-12">
-                            {isConnected && isListening ? (
-                                <div className="animate-pulse flex flex-col items-center">
-                                    <svg className="w-10 h-10 text-blue-600" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.2-3c0 2.88-2.39 5.2-5.2 5.2S6.8 13.88 6.8 11H5.2c0 3.18 2.57 5.76 5.8 6.15V21h2.2v-3.85c3.23-.39 5.8-2.97 5.8-6.15h-1.6z"></path>
-                                    </svg>
-                                    <span className="text-gray-600 text-sm mt-1">Listening...</span>
-                                </div>
-                            ) : (
-                                <div className="flex flex-col items-center text-gray-500">
-                                    <svg className="w-10 h-10" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.2-3c0 2.88-2.39 5.2-5.2 5.2S6.8 13.88 6.8 11H5.2c0 3.18 2.57 5.76 5.8 6.15V21h2.2v-3.85c3.23-.39 5.8-2.97 5.8-6.15h-1.6z"></path>
-                                    </svg>
-                                    <span className="text-sm mt-1">{isConnected ? 'Tap chat icon to type' : 'Connecting...'}</span>
-                                </div>
-                            )}
-                        </div>
-                    ) : (
-                        <div className="flex flex-col items-center w-full">
-                            {/* Image Preview */}
-                            {imagePreview && (
-                                <div className="mb-2 w-full flex justify-center relative">
-                                    <img src={imagePreview} alt="Preview" className="max-w-full max-h-40 rounded-lg shadow-md" />
-                                    <button
-                                        onClick={() => { setImagePreview(null); setImageData(null); }}
-                                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 text-xs"
-                                        title="Remove Image"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
-                                </div>
-                            )}
-
-                            <div className="flex items-center w-full">
-                                {/* Image Upload Button */}
-                                <label htmlFor="image-upload" className="mr-2 cursor-pointer p-2 rounded-xl bg-gray-200 hover:bg-gray-300 text-gray-700">
-                                    <input
-                                        id="image-upload"
-                                        type="file"
-                                        accept="image/*"
-                                        className="hidden"
-                                        onChange={handleImageChange}
-                                        disabled={!isConnected}
-                                    />
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                    </svg>
-                                </label>
-
-                                <input
-                                    value={currentMessage}
-                                    type="text"
-                                    placeholder={isConnected ? 'Ask Legacy anything...' : 'Connecting...'}
-                                    className="flex-grow w-full border rounded-xl focus:outline-none focus:border-blue-300 px-4 py-2 mr-2"
-                                    onChange={(event) => setCurrentMessage(event.target.value)}
-                                    onKeyPress={(event) => { event.key === 'Enter' && sendMessage(); }}
-                                    disabled={!isConnected}
-                                />
-                                <button
-                                    onClick={() => sendMessage()}
-                                    disabled={!isConnected || (!currentMessage.trim() && !imageData)} // Disable if no text and no image
-                                    className="flex items-center justify-center bg-blue-600 hover:bg-blue-700 rounded-xl text-white px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed transition duration-150 ease-in-out"
-                                >
-                                    <span>Send</span>
-                                    <span className="ml-2">
-                                        <svg
-                                            className="w-5 h-5 transform rotate-45 -mt-px"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            viewBox="0 0 24 24"
-                                            xmlns="http://www.w3.org/2000/svg"
-                                        >
-                                            <path
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                strokeWidth="2"
-                                                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                                            ></path>
-                                        </svg>
-                                    </span>
-                                </button>
+                                )}
+                                <p className="text-xs mt-1 opacity-75 text-right">{msg.time}</p>
                             </div>
                         </div>
+                    ))}
+                </div>
+
+                {/* Image Preview */}
+                {imagePreview && (
+                    <div className="relative p-2 border-t border-gray-200 bg-gray-100 flex items-center justify-center">
+                        <img src={imagePreview} alt="Preview" className="max-h-24 object-contain rounded-md" />
+                        <button
+                            onClick={clearImage}
+                            className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 text-xs hover:bg-red-600"
+                            title="Remove image"
+                        >
+                            <FontAwesomeIcon icon={faTimes} />
+                        </button>
+                    </div>
+                )}
+
+                {/* Message Input and Controls */}
+                <div className="p-4 border-t border-gray-200 flex items-center bg-white">
+                    <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageChange}
+                        className="hidden"
+                        id="image-upload"
+                    />
+                    <label htmlFor="image-upload" className="cursor-pointer mr-2 p-3 bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 transition-colors duration-200" title="Upload Image">
+                        <FontAwesomeIcon icon={faImage} />
+                    </label>
+
+                    {isCallMode ? (
+                        <button
+                            onClick={isListening ? stopListening : startListening}
+                            className={`flex-shrink-0 p-3 rounded-full text-white transition-all duration-300 ${
+                                isListening ? (isSpeaking ? 'bg-orange-500' : 'bg-red-500 hover:bg-red-600') : 'bg-green-500 hover:bg-green-600'
+                            } ${isSpeaking ? 'animate-pulse' : ''}`}
+                            title={isListening ? (isSpeaking ? 'AI Speaking...' : 'Stop Listening') : 'Start Listening'}
+                            disabled={isSpeaking} // Disable mic button while AI is speaking
+                        >
+                            <FontAwesomeIcon icon={isListening ? faStop : faMicrophone} />
+                            {isSpeaking && <span className="ml-2">Speaking...</span>}
+                        </button>
+                    ) : (
+                        <input
+                            type="text"
+                            value={message}
+                            onChange={handleMessageChange}
+                            onKeyPress={handleKeyPress}
+                            placeholder="Type your message..."
+                            className="flex-1 p-3 border border-gray-300 rounded-full mr-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                    )}
+
+                    {!isCallMode && ( // Only show send button in text mode
+                        <button
+                            onClick={() => sendMessage(message, imageFile)}
+                            className="p-3 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors duration-200"
+                            title="Send Message"
+                        >
+                            <FontAwesomeIcon icon={faPaperPlane} />
+                        </button>
                     )}
                 </div>
             </div>
