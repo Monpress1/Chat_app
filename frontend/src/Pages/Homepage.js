@@ -1,4 +1,4 @@
- import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import io from 'socket.io-client';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMicrophone, faStop, faPaperPlane, faImage, faTimes, faVolumeHigh } from '@fortawesome/free-solid-svg-icons';
@@ -23,7 +23,7 @@ const ChatWithAI = () => {
     const [recognition, setRecognition] = useState(null);
     const [isCallMode, setIsCallMode] = useState(false); // State to control voice mode
     const [imageFile, setImageFile] = useState(null);
-    const [imagePreview, setImagePreview] = useState(null);
+    const [imagePreview, setImagePreview] = null);
     const [isSpeaking, setIsSpeaking] = useState(false); // Tracks if any speech is ongoing
 
     const chatContainerRef = useRef(null); // Ref for scrolling to bottom
@@ -163,19 +163,19 @@ const ChatWithAI = () => {
     }, [isCallMode, imageFile, sendMessage]);
 
 
-    // Start Listening function
+    // Start Listening function - REFINED LOGIC HERE
     const startListening = useCallback(() => {
         if (!recognition) {
+            console.log("Recognition not initialized, setting up and starting.");
             const rec = setupRecognition();
             setRecognition(rec);
             currentRecognitionRef.current = rec;
             if (rec) rec.start();
-        } else {
-            // Stop any existing recognition before starting new one
-            if (isListening && currentRecognitionRef.current) {
-                currentRecognitionRef.current.stop();
-            }
+        } else if (!isListening) { // Only start if not already listening
+            console.log("Recognition initialized, but not listening. Starting.");
             recognition.start();
+        } else {
+            console.log("Already listening, no need to restart.");
         }
     }, [recognition, isListening, setupRecognition]);
 
@@ -199,11 +199,11 @@ const ChatWithAI = () => {
                 currentRecognitionRef.current = rec;
                 if (rec) rec.start();
             } else {
-                 // Stop any existing recognition before starting new one
+                 // Ensure any ongoing recognition is stopped first before starting new one
                 if (isListening && currentRecognitionRef.current) {
                     currentRecognitionRef.current.stop();
                 }
-                recognition.start();
+                recognition.start(); // This should now start if not listening
             }
         } else { // If turning OFF call mode
             stopListening();
