@@ -95,7 +95,6 @@ const availableTools = {
         // In a real app, this would send a signal to the frontend to open an app
         return { status: "success", action: "open_app", app: appName, feedback: `Opening ${appName}.` };
     }
-    // Add more tools here as needed (e.g., turnOnFlashlight, getTemperature, sendMessage, etc.)
 };
 
 
@@ -126,11 +125,10 @@ io.on('connection', (socket) => {
                                 },
                                 message: {
                                     type: "STRING",
-                                    description: "An optional message or label for the alarm.",
-                                    optional: true
+                                    description: "An optional message or label for the alarm."
                                 }
                             },
-                            required: ["time"]
+                            required: ["time"] // 'message' is optional because it's NOT listed here
                         }
                     },
                     {
@@ -154,11 +152,10 @@ io.on('connection', (socket) => {
                                 },
                                 artistName: {
                                     type: "STRING",
-                                    description: "The name of the artist, if known.",
-                                    optional: true
+                                    description: "The name of the artist, if known."
                                 }
                             },
-                            required: ["songTitle"]
+                            required: ["songTitle"] // 'artistName' is optional
                         }
                     },
                     {
@@ -173,11 +170,10 @@ io.on('connection', (socket) => {
                                 },
                                 phoneNumber: {
                                     type: "STRING",
-                                    description: "The phone number to call, if available or specified directly.",
-                                    optional: true
+                                    description: "The phone number to call, if available or specified directly."
                                 }
                             },
-                            required: ["contactName"]
+                            required: ["contactName"] // 'phoneNumber' is optional
                         }
                     },
                     {
@@ -236,7 +232,7 @@ io.on('connection', (socket) => {
         const currentChat = userChatSessions.get(socket.id);
         if (!currentChat) {
             console.error(`No chat session found for socket ID: ${socket.id}`);
-            socket.emit('receive_message', { author: 'Gemini AI', message: 'Error: No active chat session.', time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) });
+            socket.emit('receive_message', { author: 'Legacy', message: 'Error: No active chat session.', time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) });
             return;
         }
 
@@ -262,7 +258,7 @@ io.on('connection', (socket) => {
             }
 
             // Send input to the chat session
-            const result = await currentChat.sendMessage(contents); // FIX APPLIED HERE
+            const result = await currentChat.sendMessage(contents); 
             
             const response = result.response;
             const aiText = response.text();
@@ -278,7 +274,7 @@ io.on('connection', (socket) => {
                     console.log("Tool execution result:", toolResponse);
 
                     // Send the tool response back to the AI model
-                    const toolResultResponse = await currentChat.sendMessage([ // FIX APPLIED HERE (no 'contents: { parts: [...] }' wrap)
+                    const toolResultResponse = await currentChat.sendMessage([ 
                         {
                             functionResponse: {
                                 name: call.name,
@@ -289,7 +285,7 @@ io.on('connection', (socket) => {
 
                     const finalAiText = toolResultResponse.response.text();
                     socket.emit('receive_message', {
-                        author: 'Legacy', // Changed to Legacy here for backend-sent AI messages
+                        author: 'Legacy', 
                         message: finalAiText,
                         time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
                     });
@@ -297,7 +293,7 @@ io.on('connection', (socket) => {
                 } else {
                     console.warn(`Attempted to call unknown tool: ${call.name}`);
                     socket.emit('receive_message', {
-                        author: 'Legacy', // Changed to Legacy here for backend-sent AI messages
+                        author: 'Legacy', 
                         message: `I tried to perform an action, but the tool "${call.name}" is not available.`,
                         time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
                     });
@@ -305,7 +301,7 @@ io.on('connection', (socket) => {
             } else {
                 // If no function call, send the AI's direct text response
                 socket.emit('receive_message', {
-                    author: 'Legacy', // Changed to Legacy here for backend-sent AI messages
+                    author: 'Legacy', 
                     message: aiText,
                     time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
                 });
@@ -332,7 +328,7 @@ io.on('connection', (socket) => {
             }
            
             const errorMessageData = {
-                author: 'Legacy', // Changed to Legacy here for backend-sent AI messages
+                author: 'Legacy', 
                 message: errorMessage,
                 time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
             };
