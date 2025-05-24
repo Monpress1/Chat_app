@@ -1,4 +1,4 @@
- const express = require('express');
+const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
@@ -8,43 +8,32 @@ const app = express();
 const server = http.createServer(app);
 
 // -------------------------------------------------------------
-// CONFIGURE ALLOWED ORIGINS FOR CORS
-// IMPORTANT: Replace with your ACTUAL Vercel frontend URL(s)
+// NO LONGER NEEDED: ALLOWED_ORIGINS array
+// When completely removing CORS, you don't need to specify allowed origins.
+// const ALLOWED_ORIGINS = [
+//     'http://localhost:3000',
+//     'http://localhost:5173',
+//     "https://chat-app-two-jet-65.vercel.app",
+// ];
 // -------------------------------------------------------------
-const ALLOWED_ORIGINS = [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    "https://chat-app-two-jet-65.vercel.app", // <--- CONFIRM THIS IS YOUR FRONTEND URL
-    // Add any other specific Vercel preview URLs if needed
-];
 
 app.use(express.json());
 
-// CORS for HTTP requests (like /health endpoint)
+// ---
+// CORS for HTTP requests (like /health endpoint) - **NOW WIDE OPEN**
+// ---
 app.use(cors({
-    origin: (origin, callback) => {
-        if (ALLOWED_ORIGINS.includes(origin) || !origin) { // !origin allows same-origin requests
-            callback(null, true);
-        } else {
-            console.warn(`CORS blocked HTTP request from origin: ${origin}`);
-            callback(new Error('Not allowed by CORS for HTTP requests'));
-        }
-    },
+    origin: "*", // Allows ALL origins for HTTP requests
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
 }));
 
-// Socket.IO server setup
+// ---
+// Socket.IO server setup - **NOW WIDE OPEN**
+// ---
 const io = new Server(server, {
     cors: {
-        origin: (origin, callback) => {
-            if (ALLOWED_ORIGINS.includes(origin) || !origin) {
-                callback(null, true);
-            } else {
-                console.warn(`Socket.IO CORS blocked connection from origin: ${origin}`);
-                callback(new Error('Not allowed by CORS for Socket.IO connection'));
-            }
-        },
+        origin: "*", // Allows ALL origins for Socket.IO connections
         methods: ['GET', 'POST'],
         credentials: true
     },
@@ -213,4 +202,5 @@ io.on('connection', (socket) => {
         server.listen(PORT, () => {
             console.log(`Server started on PORT ${PORT}`);
             console.log(`Backend accessible locally at: http://localhost:${PORT}`);
+            console.log(`CORS is completely disabled for development purposes.`); // Added console log
         });
