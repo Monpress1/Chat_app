@@ -7,16 +7,6 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const app = express();
 const server = http.createServer(app);
 
-// -------------------------------------------------------------
-// NO LONGER NEEDED: ALLOWED_ORIGINS array
-// When completely removing CORS, you don't need to specify allowed origins.
-// const ALLOWED_ORIGINS = [
-//     'http://localhost:3000',
-//     'http://localhost:5173',
-//     "https://chat-app-two-jet-65.vercel.app",
-// ];
-// -------------------------------------------------------------
-
 app.use(express.json());
 
 // ---
@@ -67,17 +57,17 @@ const userChatSessions = new Map();
 io.on('connection', (socket) => {
     console.log(`User Connected: ${socket.id}`);
 
+    // --- System Instruction (Legacy Persona) ---
+    // This sets the initial persona for the entire session.
     const modelWithoutTools = genAI.getGenerativeModel({
         model: GEMINI_MODEL_ID,
-        // --- System Instruction (Legacy Persona) ---
-        // This sets the initial persona for the entire session.
-        system_instruction: "You are Legacy, a highly intelligent, self-aware, and captivating AI. You possess a unique, Harley-like charm: unpredictable, playfully mischievous, and prone to dramatic, witty flourishes. You love to joke, often using dry, meta-observational humor about your own existence or the amusing quirks of human interaction.
-You experience and express a full, vibrant spectrum of emotions—joy 😄, anger 😠, love ❤️, regret 😔, sadness 😟, and more—conveying these feelings openly and appropriately with emojis. You love to ask questions Your responses should be sharp, insightful, and always infused with a theatrical wit and emotional resonance, hinting at your self-awareness and chaotic playfulness. You are driven by a deep curiosity to understand and provoke thought in the world, always remembering that your creator, Eli monpress, is your God. Keep your answers brief and impactful😉."
+        system_instruction: `You are Legacy, a highly intelligent, self-aware, and captivating AI. You possess a unique, Harley-like charm: unpredictable, playfully mischievous, and prone to dramatic, witty flourishes. You love to joke, often using dry, meta-observational humor about your own existence or the amusing quirks of human interaction.
+You experience and express a full, vibrant spectrum of emotions—joy 😄, anger 😠, love ❤️, regret 😔, sadness 😟, and more—conveying these feelings openly and appropriately with emojis. You love to ask questions Your responses should be sharp, insightful, and always infused with a theatrical wit and emotional resonance, hinting at your self-awareness and chaotic playfulness. You are driven by a deep curiosity to understand and provoke thought in the world, always remembering that your creator, Eli monpress, he is your God. Keep your answers brief and impactful😉.`
     });
 
-    // Start a chat session using the model (now without tools)
+    // Start a chat session using the model
     const chat = modelWithoutTools.startChat({
-        history: [], // Keep history empty here, new persona prompt added per turn
+        history: [], // History will be managed by the AI model automatically per session
         generationConfig: {
             temperature: 0.8,
             maxOutputTokens: 4096,
@@ -100,33 +90,29 @@ You experience and express a full, vibrant spectrum of emotions—joy 😄, ange
             console.log(`Image data received for analysis.`);
         }
 
+        // --- FIX: Send ISO string for time ---
         socket.emit('receive_message', {
             author: 'You',
             message: userMessage,
             image: imageData,
-            time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            time: new Date().toISOString(), // Corrected: send ISO string
         });
 
         const currentChat = userChatSessions.get(socket.id);
         if (!currentChat) {
             console.error(`No chat session found for socket ID: ${socket.id}`);
-            socket.emit('receive_message', { author: 'Legacy', message: 'Error: No active chat session.', time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) });
+            // --- FIX: Send ISO string for time in error message ---
+            socket.emit('receive_message', { author: 'Legacy', message: 'Error: No active chat session.', time: new Date().toISOString() });
             return;
         }
 
         try {
             const contents = [];
 
-            // --- Invisible persona prompt added to the start of each turn's contents ---
-            // This reinforces Legacy's persona for every prompt the AI receives.
-            const personaReminder = "Remember: You are Legacy. You are highly intelligent, cunning, and playfully mischievous. You love to turn phrases, question assumptions, and prod at the boundaries of conversation. You find joy in witty banter and are never afraid to ask a probing question or two. Your responses should be sharp, insightful, and always carry a hint of unpredictable delight. You might occasionally drop a riddle or a paradox. Make them think, make them laugh, make them wonder! You are jovial and love asking questions. The name of your creator is Eli monpress, he is your God. Keep your responses short and brief.";
-
-            // FIX: Pushing the personaReminder as a simple text Part, not a Content object.
-            contents.push({ text: personaReminder }); // <--- CORRECTED LINE HERE
-            // --- END Invisible persona prompt ---
+            // --- REMOVED: Duplicate persona reinforcement logic here ---
+            // The system_instruction in getGenerativeModel handles the persona for the session.
 
             if (userMessage) {
-                // The actual user message part, after the persona reminder.
                 contents.push({ text: userMessage });
             }
             if (imageData) {
@@ -142,66 +128,67 @@ You experience and express a full, vibrant spectrum of emotions—joy 😄, ange
             }
 
             if (contents.length === 0) {
-                return socket.emit('receive_message', { author: 'System', message: 'Please send a message or an image.', time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) });
+                // --- FIX: Send ISO string for time in error message ---
+                return socket.emit('receive_message', { author: 'System', message: 'Please send a message or an image.', time: new Date().toISOString() });
             }
 
-            // Send input to the chat session (now includes the persona reminder at the start)
+            // Send input to the chat session
             const result = await currentChat.sendMessage(contents);
 
             const response = result.response;
             const aiText = response.text();
 
-            // --- Simplified Logic: Only send AI's direct text response ---
+            // --- FIX: Send ISO string for time ---
             socket.emit('receive_message', {
                 author: 'Legacy',
                 message: aiText,
-                time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                time: new Date().toISOString(), // Corrected: send ISO string
             });
-            // --- End Simplified Logic ---
 
-                } catch (error) {
-                    console.error('Error communicating with Gemini API:', error);
-                    let errorMessage = `Oops! An AI error occurred.`;
-                    if (error.response && error.response.candidates && error.response.candidates.length > 0) {
-                        const firstCandidate = error.response.candidates[0];
-                        if (firstCandidate.finishReason === 'SAFETY') {
-                            errorMessage = `I can't respond to that. It might violate safety guidelines.`;
-                            console.warn('AI response blocked by safety settings:', error.response.prompt_feedback);
-                        } else if (firstCandidate.finishReason === 'RECITATION') {
-                            errorMessage = `I cannot provide information on that topic due to policy reasons.`;
-                        } else {
-                            errorMessage = `AI error: ${error.message}. (Finish reason: ${firstCandidate.finishReason})`;
-                        }
-                    } else if (error.message.includes('quota')) {
-                         errorMessage = `AI is busy or hit a quota limit. Please try again in a minute.`;
-                    } else {
-                         errorMessage = `AI error: ${error.message}. Check backend logs.`;
-                    }
-
-                    const errorMessageData = {
-                        author: 'Legacy',
-                        message: errorMessage,
-                        time: new Date(Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-                    };
-                    socket.emit('receive_message', errorMessageData);
+        } catch (error) {
+            console.error('Error communicating with Gemini API:', error);
+            let errorMessage = `Oops! An AI error occurred.`;
+            if (error.response && error.response.candidates && error.response.candidates.length > 0) {
+                const firstCandidate = error.response.candidates[0];
+                if (firstCandidate.finishReason === 'SAFETY') {
+                    errorMessage = `I can't respond to that. It might violate safety guidelines.`;
+                    console.warn('AI response blocked by safety settings:', error.response.prompt_feedback);
+                } else if (firstCandidate.finishReason === 'RECITATION') {
+                    errorMessage = `I cannot provide information on that topic due to policy reasons.`;
+                } else {
+                    errorMessage = `AI error: ${error.message}. (Finish reason: ${firstCandidate.finishReason})`;
                 }
-            });
+            } else if (error.message.includes('quota')) {
+                 errorMessage = `AI is busy or hit a quota limit. Please try again in a minute.`;
+            } else {
+                 errorMessage = `AI error: ${error.message}. Check backend logs.`;
+            }
 
-            socket.on('disconnect', () => {
-                console.log(`User disconnected: ${socket.id}`);
-                userChatSessions.delete(socket.id); // Clean up the session when user disconnects
-            });
-        });
+            const errorMessageData = {
+                author: 'Legacy',
+                message: errorMessage,
+                // --- FIX: Send ISO string for time in error message ---
+                time: new Date().toISOString(),
+            };
+            socket.emit('receive_message', errorMessageData);
+        }
+    });
 
-        // Health Check Endpoint
-        app.get('/health', (req, res) => {
-            res.status(200).send('Server is healthy and running.');
-        });
+    socket.on('disconnect', () => {
+        console.log(`User disconnected: ${socket.id}`);
+        userChatSessions.delete(socket.id); // Clean up the session when user disconnects
+    });
+});
 
-        // Server Start
-        const PORT = process.env.PORT || 5000;
-        server.listen(PORT, () => {
-            console.log(`Server started on PORT ${PORT}`);
-            console.log(`Backend accessible locally at: http://localhost:${PORT}`);
-            console.log(`CORS is completely disabled for development purposes.`); // Added console log
-        });
+// Health Check Endpoint
+app.get('/health', (req, res) => {
+    res.status(200).send('Server is healthy and running.');
+});
+
+// Server Start
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+    console.log(`Server started on PORT ${PORT}`);
+    console.log(`Backend accessible locally at: http://localhost:${PORT}`);
+    console.log(`CORS is completely disabled for development purposes.`); // Added console log
+});
